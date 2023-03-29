@@ -98,11 +98,8 @@ jobs:
       id: package
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make defconfig
         make download -j8
-        find dl -size -1024c -exec ls -l {} \;
-        find dl -size -1024c -exec rm -f {} \;
-
+        
     - name: Compile the firmware
       id: compile
       run: |
