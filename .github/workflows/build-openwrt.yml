@@ -81,7 +81,7 @@ jobs:
 
     - name: Load custom configuration
       run: |
-        [ -e files ] && mv files openwrt/files
+        [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
         chmod +x $DIY_P2_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
