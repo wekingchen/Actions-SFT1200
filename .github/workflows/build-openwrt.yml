@@ -177,7 +177,7 @@ jobs:
         files: /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
 
     - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
+      uses: wekingchen/delete-workflow-runs@main
       with:
         retain_days: 1
         keep_minimum_runs: 3
