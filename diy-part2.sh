@@ -10,6 +10,7 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
+svn co https://github.com/coolsnowwolf/lede/trunk/tools/ninja tools/ninja
 svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/adbyby package/adbyby
 rm -rf feeds/packages/net/zerotier
 svn co https://github.com/coolsnowwolf/packages/trunk/net/zerotier feeds/packages/net/zerotier
