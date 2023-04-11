@@ -11,6 +11,7 @@
 #
 
 wget https://github.com/coolsnowwolf/lede/raw/master/include/meson.mk  -P ./include/
+wget https://github.com/coolsnowwolf/lede/raw/master/include/openssl-engine.mk  -P ./include/
 
 # Uncomment a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
