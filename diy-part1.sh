@@ -10,6 +10,8 @@
 # Description: OpenWrt DIY script part 1 (Before Update feeds)
 #
 
+wget https://github.com/coolsnowwolf/lede/raw/master/include/meson.mk  -P ./include/
+
 # Uncomment a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
 
