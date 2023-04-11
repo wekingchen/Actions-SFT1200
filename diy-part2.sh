@@ -23,5 +23,5 @@ rm -rf feeds/packages2/lang/golang
 svn co https://github.com/openwrt/packages/branches/openwrt-22.03/lang/golang feeds/packages/lang/golang
 svn co https://github.com/openwrt/packages/branches/openwrt-22.03/lang/golang feeds/packages2/lang/golang
 rm -rf package/libs/openssl
-wget 'https://github.com/201821143044/Actions-SFT1200-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
+wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget https://gitee.com/raymondqu/openwrt_lede_dl/raw/master/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P /workdir/openwrt/openwrt-18.06/siflower/openwrt-18.06/dl/
