@@ -67,6 +67,8 @@ jobs:
         git config --global user.name "Your Name"
         python3 setup.py -c ./configs/config-siflower-18.x.yml && cd openwrt-18.06/siflower/openwrt-18.06
         ./scripts/gen_config.py target_siflower_gl-sft1200 luci
+        rm -rf package/network/utils/iptables
+        svn co https://github.com/openwrt/openwrt/branches/openwrt-22.03/package/network/utils/iptables package/network/utils/iptables
 
     - name: Load custom feeds
       run: |
