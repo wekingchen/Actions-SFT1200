@@ -17,7 +17,7 @@ wget https://github.com/coolsnowwolf/lede/raw/master/include/openssl-engine.mk  
 sed -i "/helloworld/d" "feeds.conf.default"
 
 # Add a feed source
-echo "src-git helloworld https://github.com/wekingchen/helloworld.git" >> "feeds.conf.default"
+echo "src-git helloworld https://github.com/fw876/helloworld.git;main" >> "feeds.conf.default"
 echo "src-git gl https://github.com/gl-inet/gl-feeds.git;18.06" >> "feeds.conf.default"
 echo "src-git luci2 https://github.com/coolsnowwolf/luci" >> "feeds.conf.default"
 echo "src-git packages2 https://github.com/coolsnowwolf/packages" >> "feeds.conf.default"
