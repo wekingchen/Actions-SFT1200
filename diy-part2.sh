@@ -11,22 +11,30 @@
 #
 
 rm -rf feeds/packages/devel/diffutils
-svn co https://github.com/coolsnowwolf/packages/trunk/devel/diffutils feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
-svn co https://github.com/coolsnowwolf/packages/trunk/utils/jq feeds/packages/utils/jq
-
-svn co https://github.com/coolsnowwolf/lede/trunk/tools/ninja tools/ninja
-svn co https://github.com/coolsnowwolf/lede/trunk/package/lean/adbyby package/adbyby
 rm -rf feeds/packages/net/zerotier
-svn co https://github.com/coolsnowwolf/packages/trunk/net/zerotier feeds/packages/net/zerotier
-rm -rf feeds/packages2/multimedia/aliyundrive-webdav
-svn co https://github.com/messense/aliyundrive-webdav/trunk/openwrt/aliyundrive-webdav feeds/packages2/multimedia/aliyundrive-webdav
-rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
-svn co https://github.com/messense/aliyundrive-webdav/trunk/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications/luci-app-aliyundrive-webdav
 rm -rf feeds/packages/lang/golang
 rm -rf feeds/packages2/lang/golang
-svn co https://github.com/coolsnowwolf/packages/trunk/lang/golang feeds/packages/lang/golang
-svn co https://github.com/coolsnowwolf/packages/trunk/lang/golang feeds/packages2/lang/golang
+git clone https://github.com/coolsnowwolf/packages.git
+cp -r packages/devel/diffutils feeds/packages/devel
+cp -r packages/utils/jq feeds/packages/utils
+cp -r packages/net/zerotier feeds/packages/net
+cp -r packages/lang/golang feeds/packages/lang
+cp -r packages/lang/golang feeds/packages2/lang
+rm -rf packages
+
+rm -rf feeds/packages2/multimedia/aliyundrive-webdav
+rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
+git clone https://github.com/messense/aliyundrive-webdav.git
+cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
+cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
+rm -rf aliyundrive-webdav
+
+git clone https://github.com/coolsnowwolf/lede.git
+cp -r lede/tools/ninja tools
+cp -r lede/package/lean/adbyby package
+rm -rf lede
+
 rm -rf package/libs/openssl
 wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget https://gitee.com/raymondqu/openwrt_lede_dl/raw/master/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P /workdir/openwrt/openwrt-18.06/siflower/openwrt-18.06/dl/
