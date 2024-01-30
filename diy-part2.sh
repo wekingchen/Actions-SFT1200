@@ -30,13 +30,10 @@ cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
 cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
 
-wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
-unzip helloworld.zip
 rm -rf feeds/helloworld/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
+wget -P feeds/helloworld/shadowsocks-rust https://github.com/wekingchen/my-file/raw/master/shadowsocks-rust/Makefile
 rm -rf feeds/PWpackages/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
-rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
+wget -P feeds/PWpackages/shadowsocks-rust https://github.com/wekingchen/my-file/raw/master/shadowsocks-rust/Makefile
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
