@@ -35,13 +35,13 @@ rm -rf aliyundrive-webdav
 # rm -rf feeds/PWpackages/shadowsocks-rust
 # wget -P feeds/PWpackages/shadowsocks-rust https://github.com/wekingchen/my-file/raw/master/shadowsocks-rust/Makefile
 
-# wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
-# unzip helloworld.zip
-# rm -rf feeds/helloworld/shadowsocks-rust
-# cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
-# rm -rf feeds/PWpackages/shadowsocks-rust
-# cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
-# rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
+wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
+unzip helloworld.zip
+rm -rf feeds/helloworld/shadowsocks-rust
+cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
+rm -rf feeds/PWpackages/shadowsocks-rust
+cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
+rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
