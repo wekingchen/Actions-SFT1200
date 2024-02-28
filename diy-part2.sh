@@ -43,6 +43,9 @@ rm -rf feeds/PWpackages/shadowsocks-rust
 cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
 rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
+# 去掉libopenssl-legacy依赖
+sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/packages/net/shadowsocksr-libev/Makefile
+
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
 cp -r lede/package/lean/adbyby package
