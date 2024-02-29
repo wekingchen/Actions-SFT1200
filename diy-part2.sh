@@ -44,7 +44,7 @@ cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds
 rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 # 去掉libopenssl-legacy依赖
-sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/packages/net/shadowsocksr-libev/Makefile
+sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
@@ -55,4 +55,4 @@ git clone https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app
 
 rm -rf package/libs/openssl
 wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
-wget https://gitee.com/raymondqu/openwrt_lede_dl/raw/master/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/dl/
+wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
