@@ -58,6 +58,6 @@ rm -rf lede
 
 git clone https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app-adguardhome
 
-rm -rf package/libs/openssl
-wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
+#rm -rf package/libs/openssl
+#wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
