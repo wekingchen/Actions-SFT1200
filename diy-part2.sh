@@ -48,6 +48,7 @@ rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 # 去掉libopenssl-legacy依赖
 sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
+sed -i 's/+libpcre2/+libpcre/' feeds/PWpackages/shadowsocksr-libev/Makefile
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
