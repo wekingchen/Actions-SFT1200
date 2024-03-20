@@ -13,15 +13,19 @@
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/packages/net/zerotier
-rm -rf feeds/packages/lang/golang
-rm -rf feeds/packages2/lang/golang
 git clone https://github.com/coolsnowwolf/packages.git
 cp -r packages/devel/diffutils feeds/packages/devel
 cp -r packages/utils/jq feeds/packages/utils
 cp -r packages/net/zerotier feeds/packages/net
-cp -r packages/lang/golang feeds/packages/lang
-cp -r packages/lang/golang feeds/packages2/lang
 rm -rf packages
+
+# 修改golang源码以编译xray1.8.8+版本
+rm -rf feeds/packages/lang/golang
+rm -rf feeds/packages2/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages2/lang/golang
+sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
+sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 
 rm -rf feeds/packages2/multimedia/aliyundrive-webdav
 rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
@@ -30,10 +34,9 @@ cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
 cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
 
-# rm -rf feeds/helloworld/shadowsocks-rust
-# wget -P feeds/helloworld/shadowsocks-rust https://github.com/wekingchen/my-file/raw/master/shadowsocks-rust/Makefile
-# rm -rf feeds/PWpackages/shadowsocks-rust
-# wget -P feeds/PWpackages/shadowsocks-rust https://github.com/wekingchen/my-file/raw/master/shadowsocks-rust/Makefile
+# 修改frp版本为官网最新v0.55.1 https://github.com/fatedier/frp
+sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.55.1/' feeds/packages2/net/frp/Makefile
+sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=c655fdf679aa94ec9abefc625b79bfb12aecf36011e23c207e322a0748c6c693/' feeds/packages2/net/frp/Makefile
 
 wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
 unzip helloworld.zip
