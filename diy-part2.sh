@@ -38,6 +38,7 @@ rm -rf aliyundrive-webdav
 sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.55.1/' feeds/packages2/net/frp/Makefile
 sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=c655fdf679aa94ec9abefc625b79bfb12aecf36011e23c207e322a0748c6c693/' feeds/packages2/net/frp/Makefile
 
+# 拉取最后能编译的shadowsocks-rust
 wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
 unzip helloworld.zip
 rm -rf feeds/helloworld/shadowsocks-rust
@@ -46,10 +47,15 @@ rm -rf feeds/PWpackages/shadowsocks-rust
 cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
 rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
-# 去掉libopenssl-legacy依赖
+# 拉取最后能编译的shadowsocksr-libev
+wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0a943cab86e29dc -O helloworld.zip
+unzip helloworld.zip
+rm -rf feeds/helloworld/shadowsocksr-libev
+cp -r helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc/shadowsocksr-libev feeds/helloworld
 sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
 rm -rf feeds/PWpackages/shadowsocksr-libev
 cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
+rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
