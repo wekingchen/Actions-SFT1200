@@ -12,8 +12,8 @@
 name: Update Checker
 
 env:
-  REPO_URL: https://github.com/fw876/helloworld
-  REPO_BRANCH: master
+  REPO_URL: https://github.com/xiaorouji/openwrt-passwall-packages
+  REPO_BRANCH: main
 
 on:
   workflow_dispatch:
