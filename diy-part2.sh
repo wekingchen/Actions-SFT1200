@@ -52,7 +52,7 @@ wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0
 unzip helloworld.zip
 rm -rf feeds/helloworld/shadowsocksr-libev
 cp -r helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc/shadowsocksr-libev feeds/helloworld
-sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
+#sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
 rm -rf feeds/PWpackages/shadowsocksr-libev
 cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
 rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
