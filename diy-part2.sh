@@ -34,9 +34,9 @@ cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
 cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
 
-# 修改frp版本为官网最新v0.56.0 https://github.com/fatedier/frp
-sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.56.0/' feeds/packages2/net/frp/Makefile
-sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=084542bad79f9bed7fb18f31e7763589663e1dca243fe1c3d3dbfec45610ad5a/' feeds/packages2/net/frp/Makefile
+# 修改frp版本为官网最新v0.57.0 https://github.com/fatedier/frp
+sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.57.0/' feeds/packages2/net/frp/Makefile
+sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=460e3ea0aa18c63f21fd5e31663743dedaed2b2f75772050a7627e8534b5f47d/' feeds/packages2/net/frp/Makefile
 
 # 拉取最后能编译的shadowsocks-rust
 wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
