@@ -57,6 +57,14 @@ rm -rf feeds/PWpackages/shadowsocksr-libev
 cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
 rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
 
+# 拉取最后能编译的dns2tcp
+rm -rf feeds/helloworld/dns2tcp
+rm -rf feeds/PWpackages/dns2tcp
+git clone https://github.com/sbwml/openwrt_helloworld
+cp -r openwrt_helloworld/dns2tcp feeds/helloworld
+cp -r openwrt_helloworld/dns2tcp feeds/PWpackages
+rm -rf openwrt_helloworld
+
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
 cp -r lede/package/lean/adbyby package
