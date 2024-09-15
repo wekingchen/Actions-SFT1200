@@ -22,8 +22,8 @@ rm -rf packages
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/packages/lang/golang
 rm -rf feeds/packages2/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 22.x feeds/packages2/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages2/lang/golang
 sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 
