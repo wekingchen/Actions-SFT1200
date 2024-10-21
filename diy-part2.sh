@@ -10,6 +10,7 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
+rm -rf feeds/packages2/‎net/chinadns-ng
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/packages/net/zerotier
