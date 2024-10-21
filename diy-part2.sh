@@ -10,6 +10,7 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
+rm -rf feeds/packages2/net/{xray-core,v2ray-core,v2ray-geodata,sing-box}
 rm -rf feeds/packages2/‎net/{chinadns-ng,dns2socks,dns2tcp,microsocks}
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
