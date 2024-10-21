@@ -11,7 +11,10 @@
 #
 
 rm -rf feeds/packages2/net/{xray-core,v2ray-core,v2ray-geodata,sing-box}
-rm -rf feeds/packages2/‎net/{chinadns-ng,dns2socks,dns2tcp,microsocks}
+rm -rf feeds/packages2/net/chinadns-ng
+rm -rf feeds/packages2/net/dns2socks
+rm -rf feeds/packages2/net/dns2tcp
+rm -rf feeds/packages2/net/microsocks
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/packages/net/zerotier
