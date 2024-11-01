@@ -125,6 +125,21 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
+    - name: Get latest naiveproxy release download URL
+      id: get_naiveproxy_url
+      run: |
+          API_URL="https://api.github.com/repos/klzgrad/naiveproxy/releases"
+          DOWNLOAD_URL=$(curl -s $API_URL | grep "browser_download_url.*openwrt-mipsel_24kc-static.tar.xz" | head -n 1 | cut -d '"' -f 4)
+          echo "download_url=$DOWNLOAD_URL" >> $GITHUB_OUTPUT
+
+    - name: Download and extract naiveproxy
+      run: |
+          mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+          curl -L -o naiveproxy.tar.xz ${{ steps.get_naiveproxy_url.outputs.download_url }}
+          tar -xJf naiveproxy.tar.xz -C openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+          rm naiveproxy.tar.xz
+          chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
+
     - name: Load custom configuration
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
