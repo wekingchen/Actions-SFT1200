@@ -134,11 +134,11 @@ jobs:
 
     - name: Download and extract naiveproxy
       run: |
-          mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
-          curl -L -o naiveproxy.tar.xz ${{ steps.get_naiveproxy_url.outputs.download_url }}
-          tar -xJf naiveproxy.tar.xz -C openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
-          rm naiveproxy.tar.xz
-          chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
+       mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+       curl -L -o naiveproxy.tar.xz ${{ steps.get_naiveproxy_url.outputs.download_url }}
+       tar -xJf naiveproxy.tar.xz --strip-components=1 -C openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+       rm naiveproxy.tar.xz
+       chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
 
     - name: Load custom configuration
       run: |
