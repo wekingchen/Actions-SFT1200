@@ -139,6 +139,7 @@ jobs:
        tar -xJf naiveproxy.tar.xz --strip-components=1 -C openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
        rm naiveproxy.tar.xz
        chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
+       upx-ucl --lzma openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
 
     - name: Load custom configuration
       run: |
