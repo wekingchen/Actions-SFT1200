@@ -27,11 +27,12 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
-# rm -rf feeds/packages/net/zerotier
+rm -rf feeds/packages/net/zerotier
+rm -rf gl_feed_common/net/zerotier
 git clone https://github.com/coolsnowwolf/packages.git
 cp -r packages/devel/diffutils feeds/packages/devel
 cp -r packages/utils/jq feeds/packages/utils
-# cp -r packages/net/zerotier feeds/packages/net
+cp -r packages/net/zerotier feeds/packages/net
 rm -rf packages
 
 # 修改golang源码以编译xray1.8.8+版本
