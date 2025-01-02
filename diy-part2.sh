@@ -25,6 +25,9 @@ cp -r feeds/PWpackages/dns2socks feeds/packages2/net
 cp -r feeds/PWpackages/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 
+sed -i '/PKG_VERSION:=25\.1\.1/s/PKG_VERSION:=25\.1\.1/PKG_VERSION:=24.12.31/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
+sed -i '/PKG_HASH:=619b10d24bab367a0788b3585f8d31fa4e5e060be7f72647d6ee17bd744603a5/s/PKG_HASH:=619b10d24bab367a0788b3585f8d31fa4e5e060be7f72647d6ee17bd744603a5/PKG_HASH:=e3c24b561ab422785ee8b7d4a15e44db159d9aa249eb29a36ad1519c15267be0/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
+
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/packages/net/zerotier
