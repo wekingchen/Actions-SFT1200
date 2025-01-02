@@ -155,7 +155,6 @@ jobs:
       id: package
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make package/{clean,compile} V=s
         make download -j8
         
     - name: Compile the firmware
