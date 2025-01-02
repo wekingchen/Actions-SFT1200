@@ -123,7 +123,7 @@ jobs:
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
 
     - name: Install feeds
-      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a && make package/{clean,compile} V=s
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
     - name: Download, extract, and compress naiveproxy
       run: |
