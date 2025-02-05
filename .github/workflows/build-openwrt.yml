@@ -136,6 +136,19 @@ jobs:
        chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
        upx-ucl --lzma -v openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
 
+    - name: Download, extract, and compress latest Xray binary
+      run: |
+        API_URL="https://api.github.com/repos/XTLS/Xray-core/releases"
+        DOWNLOAD_URL=$(curl -s $API_URL | grep "browser_download_url.*Xray-linux-mips32le.zip" | head -n 1 | cut -d '"' -f 4)
+        mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+        curl -L -o Xray-linux-mips32le.zip $DOWNLOAD_URL
+        unzip -o Xray-linux-mips32le.zip -d /tmp/xray_extracted
+        mv /tmp/xray_extracted/xray openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/xray
+        rm Xray-linux-mips32le.zip
+        rm -rf /tmp/xray_extracted
+        chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/xray
+        upx-ucl --lzma -v openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/xray
+
     - name: Load custom configuration
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
