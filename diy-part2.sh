@@ -74,13 +74,13 @@ cp -r openwrt24.10/toolchain/musl toolchain
 rm -rf openwrt24.10
 
 # 拉取最后能编译的shadowsocks-rust
-#wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
-#unzip helloworld.zip
-#rm -rf feeds/helloworld/shadowsocks-rust
-#cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
-#rm -rf feeds/PWpackages/shadowsocks-rust
-#cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
-#rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
+wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
+unzip helloworld.zip
+rm -rf feeds/helloworld/shadowsocks-rust
+cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
+rm -rf feeds/PWpackages/shadowsocks-rust
+cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
+rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 # 拉取最后能编译的shadowsocksr-libev
 wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0a943cab86e29dc -O helloworld.zip
