@@ -22,14 +22,24 @@ echo "src-git helloworld https://github.com/fw876/helloworld.git;master" >> "fee
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-API_URL="https://api.github.com/repos/klzgrad/naiveproxy/releases"
-DOWNLOAD_URL=$(curl -s $API_URL | grep "browser_download_url.*openwrt-mipsel_24kc-static.tar.xz" | head -n 1 | cut -d '"' -f 4)
 mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
-curl -L -o naiveproxy.tar.xz $DOWNLOAD_URL
-tar -xJf naiveproxy.tar.xz --strip-components=1 -C openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
-rm naiveproxy.tar.xz
+
+NAIVE_API_URL="https://api.github.com/repos/klzgrad/naiveproxy/releases"
+NAIVE_DOWNLOAD_URL=$(curl -s $NAIVE_API_URL | grep "browser_download_url.*openwrt-mipsel_24kc-static.tar.xz" | head -n 1 | cut -d '"' -f 4)
+curl -L -o naiveproxy.tar.xz $NAIVE_DOWNLOAD_URL
+mkdir -p /tmp/naive_extracted
+tar -xJf naiveproxy.tar.xz -C /tmp/naive_extracted
+find /tmp/naive_extracted -name 'naive' -exec mv {} openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive \;
+rm -rf naiveproxy.tar.xz /tmp/naive_extracted
 chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
 upx-ucl --lzma -v openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/naive
+
+XRAY_URL="https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-mips32le.zip"
+curl -L -o Xray-linux-mips32le.zip $XRAY_URL
+unzip -o Xray-linux-mips32le.zip xray -d openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
+rm Xray-linux-mips32le.zip
+chmod +x openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/xray
+upx-ucl --lzma -v openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin/xray
 
 rm -rf feeds/packages2/net/xray-core
 rm -rf feeds/packages2/net/v2ray-geodata
