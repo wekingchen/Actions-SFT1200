@@ -67,11 +67,11 @@ rm -rf OldPackages.zip packages-0f7be9fc93d68986c179829d8199824d3183eb60s
 sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.61.1/' feeds/packages2/net/frp/Makefile
 sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=95c567188d5635a7ac8897a6f93ae0568d0ac4892581a96c89874a992dd6a73c/' feeds/packages2/net/frp/Makefile
 
-# 拉取openwrt22.03的musl以编译shadowsocks-rust
+# 拉取openwrt24.10的musl以编译shadowsocks-rust
 rm -rf toolchain/musl
-git clone https://github.com/openwrt/openwrt -b openwrt-22.03 openwrt22.03
-cp -r openwrt22.03/toolchain/musl toolchain
-rm -rf openwrt22.03
+git clone https://github.com/openwrt/openwrt -b openwrt-24.10 openwrt24.10
+cp -r openwrt24.10/toolchain/musl toolchain
+rm -rf openwrt24.10
 
 # 拉取最后能编译的shadowsocks-rust
 #wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
