@@ -18,6 +18,7 @@ rm -rf feeds/packages2/net/dns2socks
 rm -rf feeds/packages2/net/dns2tcp
 rm -rf feeds/packages2/net/microsocks
 rm -rf feeds/packages/net/shadowsocks-libev
+cp -r feeds/packages2/lang/rust feeds/packages/lang
 cp -r feeds/PWpackages/xray-core feeds/packages2/net
 cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
 cp -r feeds/PWpackages/sing-box feeds/packages2/net
