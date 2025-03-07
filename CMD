@@ -49,6 +49,7 @@ rm -rf feeds/packages2/net/dns2socks
 rm -rf feeds/packages2/net/dns2tcp
 rm -rf feeds/packages2/net/microsocks
 rm -rf feeds/packages/net/shadowsocks-libev
+cp -r feeds/packages2/lang/rust feeds/packages/lang
 cp -r feeds/PWpackages/xray-core feeds/packages2/net
 cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
 cp -r feeds/PWpackages/sing-box feeds/packages2/net
@@ -74,8 +75,8 @@ rm -rf packages
 
 rm -rf feeds/packages/lang/golang
 rm -rf feeds/packages2/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 23.x feeds/packages2/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 24.x feeds/packages/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 24.x feeds/packages2/lang/golang
 sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 
