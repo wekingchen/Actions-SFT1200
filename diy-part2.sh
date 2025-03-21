@@ -28,8 +28,10 @@ cp -r feeds/PWpackages/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
-sed -i '/PKG_VERSION:=25\.1\.30/s/PKG_VERSION:=25\.1\.30/PKG_VERSION:=24.12.31/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
-sed -i '/PKG_HASH:=983ee395f085ed1b7fbe0152cb56a5b605a6f70a5645d427c7186c476f14894e/s/PKG_HASH:=983ee395f085ed1b7fbe0152cb56a5b605a6f70a5645d427c7186c476f14894e/PKG_HASH:=e3c24b561ab422785ee8b7d4a15e44db159d9aa249eb29a36ad1519c15267be0/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
+sed -i 's/PKG_VERSION:=1.84.0/PKG_VERSION:=1.85.1/' feeds/packages/lang/rust/Makefile
+sed -i 's/PKG_HASH:=15cee7395b07ffde022060455b3140366ec3a12cbbea8f1ef2ff371a9cca51bf/PKG_HASH:=0f2995ca083598757a8d9a293939e569b035799e070f419a686b0996fb94238a/' feeds/packages/lang/rust/Makefile
+sed -i 's/PKG_VERSION:=1.84.0/PKG_VERSION:=1.85.1/' feeds/packages2/lang/rust/Makefile
+sed -i 's/PKG_HASH:=15cee7395b07ffde022060455b3140366ec3a12cbbea8f1ef2ff371a9cca51bf/PKG_HASH:=0f2995ca083598757a8d9a293939e569b035799e070f419a686b0996fb94238a/' feeds/packages2/lang/rust/Makefile
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
