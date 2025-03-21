@@ -34,11 +34,13 @@ sed -i 's/PKG_HASH:=15cee7395b07ffde022060455b3140366ec3a12cbbea8f1ef2ff371a9cca
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
+rm -rf feeds/packages/net/dns2tcp
 rm -rf feeds/packages/net/zerotier
 rm -rf feeds/gl_feed_common/zerotier
 git clone https://github.com/coolsnowwolf/packages.git
 cp -r packages/devel/diffutils feeds/packages/devel
 cp -r packages/utils/jq feeds/packages/utils
+cp -r packages/net/dns2tcp feeds/packages/net
 cp -r packages/net/zerotier feeds/packages/net
 cp -r packages/net/zerotier feeds/gl_feed_common
 rm -rf packages
