@@ -46,7 +46,6 @@ rm -rf feeds/packages2/net/v2ray-geodata
 rm -rf feeds/packages2/net/sing-box
 rm -rf feeds/packages2/net/chinadns-ng
 rm -rf feeds/packages2/net/dns2socks
-rm -rf feeds/packages2/net/dns2tcp
 rm -rf feeds/packages2/net/microsocks
 rm -rf feeds/packages/net/shadowsocks-libev
 cp -r feeds/packages2/lang/rust feeds/packages/lang
@@ -55,12 +54,11 @@ cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
 cp -r feeds/PWpackages/sing-box feeds/packages2/net
 cp -r feeds/PWpackages/chinadns-ng feeds/packages2/net
 cp -r feeds/PWpackages/dns2socks feeds/packages2/net
-cp -r feeds/PWpackages/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
-sed -i '/PKG_VERSION:=25\.1\.30/s/PKG_VERSION:=25\.1\.30/PKG_VERSION:=24.12.31/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
-sed -i '/PKG_HASH:=983ee395f085ed1b7fbe0152cb56a5b605a6f70a5645d427c7186c476f14894e/s/PKG_HASH:=983ee395f085ed1b7fbe0152cb56a5b605a6f70a5645d427c7186c476f14894e/PKG_HASH:=e3c24b561ab422785ee8b7d4a15e44db159d9aa249eb29a36ad1519c15267be0/' feeds/packages2/net/xray-core/Makefile feeds/PWpackages/xray-core/Makefile
+sed -i 's/PKG_VERSION:=1.84.0/PKG_VERSION:=1.85.1/' feeds/packages2/lang/rust/Makefile
+sed -i 's/PKG_HASH:=15cee7395b07ffde022060455b3140366ec3a12cbbea8f1ef2ff371a9cca51bf/PKG_HASH:=0f2995ca083598757a8d9a293939e569b035799e070f419a686b0996fb94238a/' feeds/packages2/lang/rust/Makefile
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
@@ -86,15 +84,6 @@ git clone https://github.com/messense/aliyundrive-webdav.git
 cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
 cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
-
-rm -rf feeds/packages2/net/frp
-wget https://github.com/coolsnowwolf/packages/archive/0f7be9fc93d68986c179829d8199824d3183eb60.zip -O OldPackages.zip
-unzip OldPackages.zip
-cp -r packages-0f7be9fc93d68986c179829d8199824d3183eb60/net/frp feeds/packages2/net/
-rm -rf OldPackages.zip packages-0f7be9fc93d68986c179829d8199824d3183eb60s
-
-sed -i 's/PKG_VERSION:=0.53.2/PKG_VERSION:=0.61.1/' feeds/packages2/net/frp/Makefile
-sed -i 's/PKG_HASH:=ff2a4f04e7732bc77730304e48f97fdd062be2b142ae34c518ab9b9d7a3b32ec/PKG_HASH:=95c567188d5635a7ac8897a6f93ae0568d0ac4892581a96c89874a992dd6a73c/' feeds/packages2/net/frp/Makefile
 
 wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
 unzip helloworld.zip
@@ -129,7 +118,6 @@ git clone https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app
 
 rm -rf package/libs/openssl
 rm -rf package/libs/ustream-ssl
-#wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget 'https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip' --no-check-certificate && unzip -o libs.zip && rm -f libs.zip
 wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
 
