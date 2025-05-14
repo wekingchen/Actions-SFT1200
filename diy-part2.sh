@@ -10,12 +10,6 @@
 # Description: OpenWrt DIY script part 2 (After Update feeds)
 #
 
-# 跳过Rust 构建时找libc.a
-curl -fsSL \
-  https://github.com/wekingchen/Actions-SFT1200/raw/refs/heads/main/999-disable-libc-a-check.patch \
-  -o feeds/packages2/lang/rust/patches/999-disable-libc-a-check.patch
-./scripts/feeds update rust
-
 rm -rf feeds/packages2/net/xray-core
 rm -rf feeds/packages2/net/v2ray-geodata
 rm -rf feeds/packages2/net/sing-box
