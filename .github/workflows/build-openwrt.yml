@@ -177,7 +177,7 @@ jobs:
         export PATH=$PWD/staging_dir/toolchain-mipsel_24kc_gcc/bin:$PATH
 
         # 克隆并编译 musl
-        git clone --depth 1 https://git.musl-libc.org/musl.git musl
+        git clone --depth 1 git://git.musl-libc.org/musl musl
         mkdir musl-build && cd musl-build
         CC=mipsel-openwrt-linux-gcc \
         AR=mipsel-openwrt-linux-ar \
