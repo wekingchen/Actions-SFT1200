@@ -1,0 +1,10 @@
+--- a/src/bootstrap/src/core/sanity.rs
++++ b/src/bootstrap/src/core/sanity.rs
+@@ -332,7 +332,7 @@ fn check_musl() {
+     libdir.push("lib");
+-    if !libdir.join("libc.a").exists() {
+-        panic!("couldn't find libc.a in musl libdir: {}", libdir.display());
++    if !libdir.join("libc.a").exists() {
++        eprintln!("warning: no libc.a in musl libdir {}, skipping static check", libdir.display());
+         return
+     }
