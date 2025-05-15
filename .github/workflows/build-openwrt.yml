@@ -24,7 +24,7 @@ env:
   REPO_URL: https://github.com/201821143044/gl-infra-builder-new
   REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
-  CONFIG_FILE: new.config
+  CONFIG_FILE: .config
   DIY_P1_SH: diy-part1.sh
   DIY_P2_SH: diy-part2.sh
   UPLOAD_BIN_DIR: true
@@ -124,27 +124,6 @@ jobs:
 
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
-
-    - name: Build OpenWrt toolchain
-      working-directory: openwrt/openwrt-18.06/siflower/openwrt-18.06
-      run: |
-        make toolchain/install -j$(nproc)
-
-    - name: Build musl for mipsel_24kc
-      working-directory: openwrt/openwrt-18.06/siflower/openwrt-18.06
-      run: |
-        export PATH="$PWD/staging_dir/toolchain-mipsel_24kc_gcc/bin:$PATH"
-        which mipsel-openwrt-linux-gcc
-        git clone --depth 1 git://git.musl-libc.org/musl musl
-        mkdir musl-build && cd musl-build
-        CC=mipsel-openwrt-linux-gcc \
-        AR=mipsel-openwrt-linux-ar \
-        RANLIB=mipsel-openwrt-linux-ranlib \
-          ../musl/configure --host=mipsel-openwrt-linux --prefix=/usr
-        make -j$(nproc)
-        make install DESTDIR="$PWD/../staging_dir/target-mipsel_24kc_musl"
-        cp ../staging_dir/target-mipsel_24kc_musl/usr/lib/*.a \
-           ../staging_dir/target-mipsel_24kc_musl/lib/
 
     - name: Download, extract, and compress naiveproxy/Xray
       run: |
