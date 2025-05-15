@@ -125,6 +125,27 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
+    - name: Build OpenWrt toolchain
+      working-directory: openwrt/openwrt-18.06/siflower/openwrt-18.06
+      run: |
+        make toolchain/install -j$(nproc)
+
+    - name: Build musl for mipsel_24kc
+      working-directory: openwrt/openwrt-18.06/siflower/openwrt-18.06
+      run: |
+        export PATH="$PWD/staging_dir/toolchain-mipsel_24kc_gcc/bin:$PATH"
+        which mipsel-openwrt-linux-gcc
+        git clone --depth 1 git://git.musl-libc.org/musl musl
+        mkdir musl-build && cd musl-build
+        CC=mipsel-openwrt-linux-gcc \
+        AR=mipsel-openwrt-linux-ar \
+        RANLIB=mipsel-openwrt-linux-ranlib \
+          ../musl/configure --host=mipsel-openwrt-linux --prefix=/usr
+        make -j$(nproc)
+        make install DESTDIR="$PWD/../staging_dir/target-mipsel_24kc_musl"
+        cp ../staging_dir/target-mipsel_24kc_musl/usr/lib/*.a \
+           ../staging_dir/target-mipsel_24kc_musl/lib/
+
     - name: Download, extract, and compress naiveproxy/Xray
       run: |
         mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
@@ -164,31 +185,6 @@ jobs:
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-
-    - name: Build OpenWrt toolchain
-      working-directory: openwrt/openwrt-18.06/siflower/openwrt-18.06
-      run: |
-        # 只构建交叉工具链，不编整固件
-        make toolchain/install -j$(nproc)
-
-    - name: Build musl for mipsel_24kc
-      run: |
-        # 把 OpenWrt 造好的交叉链加入 PATH
-        export PATH=$PWD/staging_dir/toolchain-mipsel_24kc_gcc/bin:$PATH
-
-        # 克隆并编译 musl
-        git clone --depth 1 git://git.musl-libc.org/musl musl
-        mkdir musl-build && cd musl-build
-        CC=mipsel-openwrt-linux-gcc \
-        AR=mipsel-openwrt-linux-ar \
-        RANLIB=mipsel-openwrt-linux-ranlib \
-          ../musl/configure --host=mipsel-openwrt-linux --prefix=/usr
-        make -j$(nproc)
-        make install DESTDIR=${GITHUB_WORKSPACE}/openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-mipsel_24kc_musl
-
-        # 拷静态库到 staging_dir
-        cp -v staging_dir/target-mipsel_24kc_musl/usr/lib/*.a \
-              openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-mipsel_24kc_musl/lib/
 
     - name: Download package
       id: package
