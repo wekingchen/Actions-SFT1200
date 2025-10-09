@@ -129,7 +129,7 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    # ------------------ 根治编译问题的关键步骤 ------------------
+    # ------------------ 根治编译问题的关键步骤 (已修正) ------------------
     - name: Fix ncurses host build to be PIC
       run: |
         set -euo pipefail
@@ -141,19 +141,25 @@ jobs:
           echo "Patching $mk to build shared PIC host library..."
 
           # 让 host 端产出共享库 & widec，并增加 termlib 支持
-          if grep -q '^HOST_CONFIGURE_ARGS' "$mk"; then
-            sed -i 's#^HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
+          # (修正) 使用更宽松的 grep 和 sed 来处理可能存在的缩进
+          if grep -q 'HOST_CONFIGURE_ARGS' "$mk"; then
+            sed -i 's#.*HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
           else
             echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
           fi
 
           # Host 侧强制 -fPIC (双保险)
-          if grep -q '^HOST_CONFIGURE_VARS' "$mk"; then
-            sed -i 's#^HOST_CONFIGURE_VARS.*#HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC"#' "$mk"
+          # (修正) 使用更宽松的 grep 和 sed，并同时为 C 和 C++ 添加 CFLAGS
+          if grep -q 'HOST_CONFIGURE_VARS' "$mk"; then
+            sed -i 's#.*HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
           else
-            echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC"' >> "$mk"
+            echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
           fi
         done
+        
+        echo "--- Content of patched ncurses Makefile for debugging ---"
+        cat feeds/packages/libs/ncurses/Makefile || echo "ncurses Makefile not found in feeds/packages."
+        echo "--------------------------------------------------------"
 
         # 2) 兜底：避免旧的非 PIC 静态库被优先链接
         for a in \
