@@ -176,6 +176,11 @@ jobs:
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
+
+        # 在这里添加 export 命令来解决 -fPIC 链接问题
+        export CFLAGS="${CFLAGS} -fPIC"
+        export CXXFLAGS="${CXXFLAGS} -fPIC"
+        
         make -j$(nproc) V=s
         # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
