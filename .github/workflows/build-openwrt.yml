@@ -135,94 +135,58 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make defconfig
 
-    # ------------------ 根治编译问题的关键步骤 (最终修正版) ------------------
     - name: Fix host packages build (ncurses, python)
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-
-        # 1) 主树(package)与feeds分别打补丁
-        for mk in package/libs/ncurses/Makefile feeds/packages/libs/ncurses/Makefile feeds/packages2/libs/ncurses/Makefile; do
-          [ -f "$mk" ] || continue
-          echo "Patching $mk for host shared+widec+termlib + PIC ..."
-
-          if echo "$mk" | grep -q '^package/libs/ncurses/Makefile$'; then
-            # --- 情况A：主树 package/libs/ncurses ---
-            if ! sed -n '/^define Host\/Configure/,/^endef/p' "$mk" | grep -q -- '--enable-widec'; then
-              sed -i '/^define Host\/Configure/,/^endef/ s#\(\.\?bash \)\?\.\/configure #& --with-shared --enable-widec --with-termlib --without-debug --without-ada #' "$mk"
-            fi
-            if grep -q '^HOST_CONFIGURE_VARS' "$mk"; then
-              grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#^HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
+        
+        # 定位 ncurses 的 Makefile 文件
+        NCURSES_MAKEFILE="package/libs/ncurses/Makefile"
+        if [ -f "$NCURSES_MAKEFILE" ]; then
+            echo "Patching $NCURSES_MAKEFILE to force PIC build for host..."
+            # 直接在 HOST_CFLAGS 定义中添加 -fPIC
+            if grep -q "^HOST_CFLAGS" "$NCURSES_MAKEFILE"; then
+                sed -i 's/^\(HOST_CFLAGS.*\)/\1 -fPIC/' "$NCURSES_MAKEFILE"
             else
-              echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
+                echo 'HOST_CFLAGS += -fPIC' >> "$NCURSES_MAKEFILE"
             fi
-          else
-            # --- 情况B：feeds 下的 ncurses ---
-            if grep -q 'HOST_CONFIGURE_ARGS' "$mk"; then
-              grep -q -- '--enable-widec' "$mk" || sed -i 's#.*HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
-            else
-              echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
-            fi
-            if grep -q 'HOST_CONFIGURE_VARS' "$mk"; then
-              grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#.*HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
-            else
-              echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
-            fi
-          fi
-        done
-
-        # 为 Python Host 构建添加 rpath (兜底)
-        for py in feeds/packages/lang/python/python.mk package/lang/python/python.mk; do
-          [ -f "$py" ] || continue
-          echo "Patching $py for python host rpath..."
-          if grep -q 'HOST_LDFLAGS' "$py"; then
-            sed -i 's#^HOST_LDFLAGS.*#& -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib#' "$py"
-          else
-            echo 'HOST_LDFLAGS += -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib' >> "$py"
-          fi
-        done
-
-        echo "--- Dump Host/Configure block (package/libs/ncurses) ---"
-        sed -n '/^define Host\/Configure/,/^endef/p' package/libs/ncurses/Makefile || true
-        echo "--------------------------------------------------------"
-
-        # 2) 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
+        else
+            echo "Warning: $NCURSES_MAKEFILE not found."
+        fi
+        
+        # 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
         for a in \
           staging_dir/hostpkg/lib/libncurses*.a \
           staging_dir/hostpkg/lib/libpanel*.a \
           staging_dir/hostpkg/lib/libtinfo*.a; do
           [ -f "$a" ] && mv -f "$a" "$a".bak-nonpic || true
         done
-
-        # 3) 立刻重编 host 侧 ncurses & python
+        
+        # 立刻重编 host 侧 ncurses & python
         make package/ncurses/host/clean V=s
         make package/ncurses/host/compile V=s
         make package/python/host/clean V=s
         make package/python/host/compile V=s
 
-    - name: Verify host ncurses shared libs
+    - name: Verify host ncurses is PIC
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo "Verifying that the ncurses host libraries were built as shared objects..."
-        ok=0
-        for so in staging_dir/hostpkg/lib/libncurses*.so* staging_dir/hostpkg/lib/libpanel*.so* staging_dir/hostpkg/lib/libtinfo*.so*; do
-          if ls -l $so 2>/dev/null; then ok=1; fi
-        done
-        if [ $ok -eq 0 ]; then
-          echo "FATAL: host ncurses shared libraries not found (.so missing)."
-          ls -l staging_dir/hostpkg/lib/
+        echo "Verifying that the ncurses host library is Position-Independent Code..."
+        # 检查静态库中的目标文件是否包含PIC重定位信息
+        if readelf -r staging_dir/hostpkg/lib/libncurses.a | grep -q 'R_X86_64_PC32'; then
+          echo "FATAL: libncurses.a still contains non-PIC relocations."
           exit 1
+        else
+          echo "Verification successful, libncurses.a appears to be compiled with -fPIC."
         fi
-        echo "Verification successful, .so files found."
-    
+
     - name: Bootstrap tools & toolchain
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make -j"$(nproc)" tools/install V=s
         make -j"$(nproc)" toolchain/install V=s
-    # ------------------ 修复步骤结束 ------------------
 
     - name: Download, extract, and compress naiveproxy/Xray
       run: |
