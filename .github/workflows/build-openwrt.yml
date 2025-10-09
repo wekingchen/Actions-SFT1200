@@ -129,56 +129,84 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    # ------------------ 根治编译问题的关键步骤 (已修正) ------------------
-    - name: Fix ncurses host build to be PIC
+    - name: Refresh defconfig after feeds
+      run: |
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        make defconfig
+
+    - name: Bootstrap tools & toolchain
+      run: |
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        make -j"$(nproc)" tools/install V=s
+        make -j"$(nproc)" toolchain/install V=s
+
+    # ------------------ 根治编译问题的关键步骤 (最终修正版) ------------------
+    - name: Fix host packages build (ncurses, python)
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
 
-        # 1) 修改 feeds 里的 ncurses Makefile，强制 host 包编译为 PIC 共享库
-        for mk in feeds/packages/libs/ncurses/Makefile feeds/packages2/libs/ncurses/Makefile; do
+        # 1) 主树(package)与feeds分别打补丁
+        for mk in package/libs/ncurses/Makefile feeds/packages/libs/ncurses/Makefile feeds/packages2/libs/ncurses/Makefile; do
           [ -f "$mk" ] || continue
-          echo "Patching $mk to build shared PIC host library..."
+          echo "Patching $mk for host shared+widec+termlib + PIC ..."
 
-          # 让 host 端产出共享库 & widec，并增加 termlib 支持
-          # (修正) 使用更宽松的 grep 和 sed 来处理可能存在的缩进
-          if grep -q 'HOST_CONFIGURE_ARGS' "$mk"; then
-            sed -i 's#.*HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
+          if echo "$mk" | grep -q '^package/libs/ncurses/Makefile$'; then
+            # --- 情况A：主树 package/libs/ncurses ---
+            if ! sed -n '/^define Host\/Configure/,/^endef/p' "$mk" | grep -q -- '--enable-widec'; then
+              sed -i '/^define Host\/Configure/,/^endef/ s#\(bash \)\?\.\/configure #& --with-shared --enable-widec --with-termlib --without-debug --without-ada #' "$mk"
+            fi
+            if grep -q '^HOST_CONFIGURE_VARS' "$mk"; then
+              grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#^HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
+            else
+              echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
+            fi
           else
-            echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
-          fi
-
-          # Host 侧强制 -fPIC (双保险)
-          # (修正) 使用更宽松的 grep 和 sed，并同时为 C 和 C++ 添加 CFLAGS
-          if grep -q 'HOST_CONFIGURE_VARS' "$mk"; then
-            sed -i 's#.*HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
-          else
-            echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
+            # --- 情况B：feeds 下的 ncurses ---
+            if grep -q 'HOST_CONFIGURE_ARGS' "$mk"; then
+              grep -q -- '--enable-widec' "$mk" || sed -i 's#.*HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
+            else
+              echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
+            fi
+            if grep -q 'HOST_CONFIGURE_VARS' "$mk"; then
+              grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#.*HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
+            else
+              echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
+            fi
           fi
         done
-        
-        echo "--- Content of patched ncurses Makefile for debugging ---"
-        cat feeds/packages/libs/ncurses/Makefile || echo "ncurses Makefile not found in feeds/packages."
+
+        # 为 Python Host 构建添加 rpath (兜底)
+        for py in feeds/packages/lang/python/python.mk package/lang/python/python.mk; do
+          [ -f "$py" ] || continue
+          echo "Patching $py for python host rpath..."
+          if grep -q 'HOST_LDFLAGS' "$py"; then
+            sed -i 's#^HOST_LDFLAGS.*#& -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib#' "$py"
+          else
+            echo 'HOST_LDFLAGS += -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib' >> "$py"
+          fi
+        done
+
+        echo "--- Dump Host/Configure block (package/libs/ncurses) ---"
+        sed -n '/^define Host\/Configure/,/^endef/p' package/libs/ncurses/Makefile || true
         echo "--------------------------------------------------------"
 
-        # 2) 兜底：避免旧的非 PIC 静态库被优先链接
+        # 2) 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
         for a in \
-          staging_dir/hostpkg/lib/libncurses.a \
-          staging_dir/hostpkg/lib/libncursesw.a \
-          staging_dir/hostpkg/lib/libpanel.a \
-          staging_dir/hostpkg/lib/libpanelw.a \
-          staging_dir/hostpkg/lib/libtinfo.a
-        do
+          staging_dir/hostpkg/lib/libncurses*.a \
+          staging_dir/hostpkg/lib/libpanel*.a \
+          staging_dir/hostpkg/lib/libtinfo*.a; do
           [ -f "$a" ] && mv -f "$a" "$a".bak-nonpic || true
         done
 
-        # 3) 清理并立即重编 host 端 ncurses & python，用于快速验证
+        # 3) 立刻重编 host 侧 ncurses & python
         make package/ncurses/host/clean V=s
         make package/ncurses/host/compile V=s
-
         make package/python/host/clean V=s
         make package/python/host/compile V=s
-    
+
     - name: Verify host ncurses shared libs
       run: |
         set -euo pipefail
@@ -190,6 +218,7 @@ jobs:
         done
         if [ $ok -eq 0 ]; then
           echo "FATAL: host ncurses shared libraries not found (.so missing)."
+          ls -l staging_dir/hostpkg/lib/
           exit 1
         fi
         echo "Verification successful, .so files found."
