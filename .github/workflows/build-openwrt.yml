@@ -135,13 +135,6 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make defconfig
 
-    - name: Bootstrap tools & toolchain
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make -j"$(nproc)" tools/install V=s
-        make -j"$(nproc)" toolchain/install V=s
-
     # ------------------ 根治编译问题的关键步骤 (最终修正版) ------------------
     - name: Fix host packages build (ncurses, python)
       run: |
@@ -156,7 +149,7 @@ jobs:
           if echo "$mk" | grep -q '^package/libs/ncurses/Makefile$'; then
             # --- 情况A：主树 package/libs/ncurses ---
             if ! sed -n '/^define Host\/Configure/,/^endef/p' "$mk" | grep -q -- '--enable-widec'; then
-              sed -i '/^define Host\/Configure/,/^endef/ s#\(bash \)\?\.\/configure #& --with-shared --enable-widec --with-termlib --without-debug --without-ada #' "$mk"
+              sed -i '/^define Host\/Configure/,/^endef/ s#\(\.\?bash \)\?\.\/configure #& --with-shared --enable-widec --with-termlib --without-debug --without-ada #' "$mk"
             fi
             if grep -q '^HOST_CONFIGURE_VARS' "$mk"; then
               grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#^HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
@@ -222,6 +215,13 @@ jobs:
           exit 1
         fi
         echo "Verification successful, .so files found."
+    
+    - name: Bootstrap tools & toolchain
+      run: |
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        make -j"$(nproc)" tools/install V=s
+        make -j"$(nproc)" toolchain/install V=s
     # ------------------ 修复步骤结束 ------------------
 
     - name: Download, extract, and compress naiveproxy/Xray
@@ -369,3 +369,4 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
