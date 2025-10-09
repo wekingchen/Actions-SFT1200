@@ -92,9 +92,11 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
+        set -euo pipefail
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
+        sudo -E apt-get -qq install upx-ucl || true
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -103,6 +105,7 @@ jobs:
     - name: Clone source code
       working-directory: ./
       run: |
+        set -euo pipefail
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
@@ -114,6 +117,7 @@ jobs:
 
     - name: Load custom feeds
       run: |
+        set -euo pipefail
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
@@ -125,8 +129,69 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
+    # ------------------ 根治编译问题的关键步骤 ------------------
+    - name: Fix ncurses host build to be PIC
+      run: |
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+
+        # 1) 修改 feeds 里的 ncurses Makefile，强制 host 包编译为 PIC 共享库
+        for mk in feeds/packages/libs/ncurses/Makefile feeds/packages2/libs/ncurses/Makefile; do
+          [ -f "$mk" ] || continue
+          echo "Patching $mk to build shared PIC host library..."
+
+          # 让 host 端产出共享库 & widec，并增加 termlib 支持
+          if grep -q '^HOST_CONFIGURE_ARGS' "$mk"; then
+            sed -i 's#^HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
+          else
+            echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
+          fi
+
+          # Host 侧强制 -fPIC (双保险)
+          if grep -q '^HOST_CONFIGURE_VARS' "$mk"; then
+            sed -i 's#^HOST_CONFIGURE_VARS.*#HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC"#' "$mk"
+          else
+            echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC"' >> "$mk"
+          fi
+        done
+
+        # 2) 兜底：避免旧的非 PIC 静态库被优先链接
+        for a in \
+          staging_dir/hostpkg/lib/libncurses.a \
+          staging_dir/hostpkg/lib/libncursesw.a \
+          staging_dir/hostpkg/lib/libpanel.a \
+          staging_dir/hostpkg/lib/libpanelw.a \
+          staging_dir/hostpkg/lib/libtinfo.a
+        do
+          [ -f "$a" ] && mv -f "$a" "$a".bak-nonpic || true
+        done
+
+        # 3) 清理并立即重编 host 端 ncurses & python，用于快速验证
+        make package/ncurses/host/clean V=s
+        make package/ncurses/host/compile V=s
+
+        make package/python/host/clean V=s
+        make package/python/host/compile V=s
+    
+    - name: Verify host ncurses shared libs
+      run: |
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        echo "Verifying that the ncurses host libraries were built as shared objects..."
+        ok=0
+        for so in staging_dir/hostpkg/lib/libncurses*.so* staging_dir/hostpkg/lib/libpanel*.so* staging_dir/hostpkg/lib/libtinfo*.so*; do
+          if ls -l $so 2>/dev/null; then ok=1; fi
+        done
+        if [ $ok -eq 0 ]; then
+          echo "FATAL: host ncurses shared libraries not found (.so missing)."
+          exit 1
+        fi
+        echo "Verification successful, .so files found."
+    # ------------------ 修复步骤结束 ------------------
+
     - name: Download, extract, and compress naiveproxy/Xray
       run: |
+        set -euo pipefail
         mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
 
         echo "Processing naiveproxy..."
@@ -152,6 +217,7 @@ jobs:
 
     - name: Load custom configuration
       run: |
+        set -euo pipefail
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
         chmod +x $DIY_P2_SH
@@ -168,19 +234,16 @@ jobs:
     - name: Download package
       id: package
       run: |
+        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
         
     - name: Compile the firmware
       id: compile
       run: |
+        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
-
-        # 在这里添加 export 命令来解决 -fPIC 链接问题
-        export CFLAGS="${CFLAGS} -fPIC"
-        export CXXFLAGS="${CXXFLAGS} -fPIC"
-        
         make -j$(nproc) V=s
         # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -203,6 +266,7 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
+        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
@@ -219,6 +283,7 @@ jobs:
       id: cowtransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
       run: |
+        set -euo pipefail
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
@@ -228,6 +293,7 @@ jobs:
       id: wetransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
       run: |
+        set -euo pipefail
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
@@ -237,6 +303,7 @@ jobs:
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
+        set -euo pipefail
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
         [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
