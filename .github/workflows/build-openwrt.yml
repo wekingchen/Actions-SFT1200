@@ -140,51 +140,7 @@ jobs:
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
 
-        # 1) 主树(package)与feeds分别打补丁
-        for mk in package/libs/ncurses/Makefile feeds/packages/libs/ncurses/Makefile feeds/packages2/libs/ncurses/Makefile; do
-          [ -f "$mk" ] || continue
-          echo "Patching $mk for host shared+widec+termlib + PIC ..."
-
-          if echo "$mk" | grep -q '^package/libs/ncurses/Makefile$'; then
-            # --- 情况A：主树 package/libs/ncurses ---
-            # 在 Host/Configure 的 ./configure 后追加我们需要的参数；避免重复追加做个判定
-            if ! sed -n '/^define Host\/Configure/,/^endef/p' "$mk" | grep -q -- '--enable-widec'; then
-              sed -i '/^define Host\/Configure/,/^endef/ s#\(\.\?bash \)\?\.\/configure #& --with-pic --enable-widec --with-termlib --without-debug --without-ada #' "$mk"
-            fi
-            # 就地修改传入的 CFLAGS/CXXFLAGS
-            sed -i '/^define Host\/Configure/,/^endef/ s#CFLAGS="\([^"]*\)"#CFLAGS="\1 -fPIC"#'  "$mk" || true
-            sed -i '/^define Host\/Configure/,/^endef/ s#CXXFLAGS="\([^"]*\)"#CXXFLAGS="\1 -fPIC"#' "$mk" || true
-          else
-            # --- 情况B：feeds 下的 ncurses ---
-            if grep -q 'HOST_CONFIGURE_ARGS' "$mk"; then
-              grep -q -- '--enable-widec' "$mk" || sed -i 's#.*HOST_CONFIGURE_ARGS.*#& --with-shared --enable-widec --with-termlib --without-debug --without-ada#' "$mk"
-            else
-              echo 'HOST_CONFIGURE_ARGS += --with-shared --enable-widec --with-termlib --without-debug --without-ada' >> "$mk"
-            fi
-            if grep -q 'HOST_CONFIGURE_VARS' "$mk"; then
-              grep -q 'CFLAGS=.*-fPIC' "$mk" || sed -i 's#.*HOST_CONFIGURE_VARS.*#& CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"#' "$mk"
-            else
-              echo 'HOST_CONFIGURE_VARS += CFLAGS="$(HOST_CFLAGS) -fPIC" CXXFLAGS="$(HOST_CXXFLAGS) -fPIC"' >> "$mk"
-            fi
-          fi
-        done
-
-        # 为 Python Host 构建加 rpath (兜底)
-        for py in feeds/packages/lang/python/python.mk package/lang/python/python.mk; do
-          [ -f "$py" ] || continue
-          echo "Patching $py to add host rpath..."
-          if grep -q '^HOST_LDFLAGS' "$py"; then
-            sed -i 's#^HOST_LDFLAGS.*#& -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib#' "$py"
-          else
-            echo 'HOST_LDFLAGS += -Wl,-rpath,$(STAGING_DIR_HOSTPKG)/lib' >> "$py"
-          fi
-        done
-
-        echo "--- Dump Host/Configure block (package/libs/ncurses) ---"
-        sed -n '/^define Host\/Configure/,/^endef/p' package/libs/ncurses/Makefile || true
-        echo "--------------------------------------------------------"
-
-        # 2) 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
+        # 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
         for a in \
           staging_dir/hostpkg/lib/libncurses*.a \
           staging_dir/hostpkg/lib/libpanel*.a \
@@ -192,14 +148,13 @@ jobs:
           [ -f "$a" ] && mv -f "$a" "$a".bak-nonpic || true
         done
 
-        # 3) 立刻重编 host 侧 ncurses & python
+        # 清理并使用 make 命令行变量覆盖来强制重编 host ncurses 为 PIC
         make package/ncurses/host/clean V=s
-        make package/ncurses/host/compile V=s
+        make package/ncurses/host/compile V=s HOST_CFLAGS="-fPIC -O2"
+
+        # 清理并重编 python host
         make package/python/host/clean V=s
         make package/python/host/compile V=s
-        
-        # 打印关键信息确认 -fPIC/--with-pic 已进入 configure
-        grep -E '(^| )CFLAGS=|--with-pic|--enable-widec|--with-termlib' build_dir/hostpkg/ncurses-*/config.log || true
 
     - name: Verify host ncurses is PIC
       run: |
