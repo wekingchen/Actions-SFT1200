@@ -129,12 +129,6 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    - name: Refresh defconfig after feeds
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make defconfig
-
     - name: Fix host packages build (ncurses, python)
       run: |
         set -euo pipefail
@@ -216,12 +210,21 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    - name: Ensure target dependencies are configured
+    - name: Configure and pre-install target dependencies
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        
+        # Robustly enable wide-character support for ncurses target package
+        sed -i '/CONFIG_NCURSES_WIDEC/d' .config
         echo "CONFIG_NCURSES_WIDEC=y" >> .config
+        
+        # Refresh configuration to apply changes and resolve dependencies
         make defconfig
+        
+        # Explicitly pre-compile and install ncurses for the target.
+        # This prevents a race condition during parallel builds.
+        make package/ncurses/install V=s
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
