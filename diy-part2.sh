@@ -95,3 +95,8 @@ rm -rf package/libs/ustream-ssl
 #wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget 'https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip' --no-check-certificate && unzip -o libs.zip && rm -f libs.zip
 wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
+
+# 修复 ncurses relocation 错误（确保静态库加 -fPIC）
+sed -i '/^TARGET_CFLAGS/s/$/ -fPIC/' package/libs/ncurses/Makefile
+export CFLAGS="$CFLAGS -fPIC"
+export CXXFLAGS="$CXXFLAGS -fPIC"
