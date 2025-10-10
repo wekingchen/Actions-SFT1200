@@ -92,11 +92,9 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        set -euo pipefail
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
-        sudo -E apt-get -qq install upx-ucl || true
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
@@ -105,7 +103,6 @@ jobs:
     - name: Clone source code
       working-directory: ./
       run: |
-        set -euo pipefail
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
@@ -117,7 +114,6 @@ jobs:
 
     - name: Load custom feeds
       run: |
-        set -euo pipefail
         [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
         chmod +x $DIY_P1_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
@@ -129,55 +125,8 @@ jobs:
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    - name: Fix host packages build (ncurses, python)
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-
-        # 兜底：把旧的非PIC静态库先藏起来, 防止被误链接
-        for a in \
-          staging_dir/hostpkg/lib/libncurses*.a \
-          staging_dir/hostpkg/lib/libpanel*.a \
-          staging_dir/hostpkg/lib/libtinfo*.a; do
-          [ -f "$a" ] && mv -f "$a" "$a".bak-nonpic || true
-        done
-
-        # 清理并使用 make 命令行变量覆盖来强制重编 host ncurses 为 PIC
-        make package/ncurses/host/clean V=s
-        make package/ncurses/host/compile V=s HOST_CFLAGS="-fPIC -O2"
-
-        # 清理并重编 python host
-        make package/python/host/clean V=s
-        make package/python/host/compile V=s
-
-    - name: Verify host ncurses is PIC
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo "Verifying host ncurses archives are PIC by actually linking a tiny shared object..."
-
-        cat > /tmp/test_curses.c <<'EOF'
-        #include <curses.h>
-        void test_sym(void){ initscr(); endwin(); }
-        EOF
-
-        # 用 host 的系统编译器把 .a 链成共享库；能过就说明 .a 中对象是 PIC
-        gcc -fPIC -shared /tmp/test_curses.c \
-          -L staging_dir/hostpkg/lib -Wl,-rpath,'$ORIGIN' \
-          -o /tmp/libtestcurses.so -lncurses -lpanel -ltinfo
-
-        echo "OK: linked /tmp/libtestcurses.so successfully (host ncurses *.a are PIC)."
-    
-    - name: Bootstrap tools & toolchain
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make -j"$(nproc)" tools/install V=s
-        make -j"$(nproc)" toolchain/install V=s
-
     - name: Download, extract, and compress naiveproxy/Xray
       run: |
-        set -euo pipefail
         mkdir -p openwrt/openwrt-18.06/siflower/openwrt-18.06/files/usr/bin
 
         echo "Processing naiveproxy..."
@@ -203,28 +152,11 @@ jobs:
 
     - name: Load custom configuration
       run: |
-        set -euo pipefail
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
         chmod +x $DIY_P2_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
-
-    - name: Configure and pre-install target dependencies
-      run: |
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        
-        # Robustly enable wide-character support for ncurses target package
-        sed -i '/CONFIG_NCURSES_WIDEC/d' .config
-        echo "CONFIG_NCURSES_WIDEC=y" >> .config
-        
-        # Refresh configuration to apply changes and resolve dependencies
-        make defconfig
-        
-        # Explicitly pre-compile and install ncurses for the target.
-        # This prevents a race condition during parallel builds.
-        make package/ncurses/install V=s
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -236,16 +168,14 @@ jobs:
     - name: Download package
       id: package
       run: |
-        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
         
     - name: Compile the firmware
       id: compile
       run: |
-        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"
+        echo -e "$(nproc) thread compile"    
         make -j$(nproc) V=s
         # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -268,7 +198,6 @@ jobs:
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
-        set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/*/*
         rm -rf packages
         echo "FIRMWARE=$PWD" >> $GITHUB_ENV
@@ -285,7 +214,6 @@ jobs:
       id: cowtransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
       run: |
-        set -euo pipefail
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
         echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
@@ -295,7 +223,6 @@ jobs:
       id: wetransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
       run: |
-        set -euo pipefail
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
@@ -305,7 +232,6 @@ jobs:
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
-        set -euo pipefail
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
         [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
@@ -336,4 +262,3 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
