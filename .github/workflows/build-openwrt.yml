@@ -224,7 +224,7 @@ jobs:
         
         # Explicitly pre-compile and install ncurses for the target.
         # This prevents a race condition during parallel builds.
-        make package/libs/ncurses/install V=s
+        make package/ncurses/install V=s
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -336,3 +336,4 @@ jobs:
         delete_tags: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
