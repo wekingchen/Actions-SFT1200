@@ -96,13 +96,15 @@ rm -rf package/libs/ustream-ssl
 wget 'https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip' --no-check-certificate && unzip -o libs.zip && rm -f libs.zip
 wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
 
-# 彻底清理 ncurses 相关 build 目录
-rm -rf openwrt/openwrt-18.06/siflower/openwrt-18.06/build_dir/hostpkg/ncurses*
-rm -rf openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/hostpkg/lib/libncurses*
+# 修复 host ncurses 静态库 relocation 错误
+sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' package/libs/ncurses/Makefile
 
-# patch package/libs/ncurses/Makefile 的 CFLAGS
-sed -i '/^TARGET_CFLAGS/s/$/ -fPIC/' package/libs/ncurses/Makefile
+# 清理老的 hostpkg ncurses
+rm -rf build_dir/hostpkg/ncurses*
+rm -rf staging_dir/hostpkg/lib/libncurses*
 
-# 强制 OpenWrt 用动态库
-echo "CONFIG_PACKAGE_libncurses=y" >> .config
-echo "CONFIG_PACKAGE_libpanel=y" >> .config
+# 强制只用动态库
+find staging_dir/hostpkg/lib/ -name "libncurses.a" -delete
+find staging_dir/hostpkg/lib/ -name "libpanel.a" -delete
+
+export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:$LD_LIBRARY_PATH"
