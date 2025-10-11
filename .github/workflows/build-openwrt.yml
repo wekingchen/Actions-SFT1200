@@ -94,6 +94,8 @@ jobs:
       run: |
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
+        sudo add-apt-repository universe
+        sudo apt-get update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
