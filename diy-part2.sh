@@ -30,6 +30,10 @@ cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 sed -i 's/PKG_VERSION:=1.84.0/PKG_VERSION:=1.85.1/' feeds/packages2/lang/rust/Makefile
 sed -i 's/PKG_HASH:=15cee7395b07ffde022060455b3140366ec3a12cbbea8f1ef2ff371a9cca51bf/PKG_HASH:=0f2995ca083598757a8d9a293939e569b035799e070f419a686b0996fb94238a/' feeds/packages2/lang/rust/Makefile
 
+# 将geoview版本固定到0.1.10
+sed -i 's/PKG_VERSION:=0.1.11/PKG_VERSION:=0.1.10/' feeds/packages2/net/geoview/Makefile
+sed -i 's/PKG_HASH:=a3ad07d3926c329f6990d67e17119f0c9a4ee26e89b0e2f541b27230c2806e94/PKG_HASH:=9221df928df68030893125a60bdf6d8a1fef2b199fa58ed80772cb3c17225fc5/' feeds/packages2/net/geoview/Makefile
+
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/packages/net/zerotier
