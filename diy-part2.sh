@@ -53,6 +53,13 @@ git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages2/
 sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 
+# 清理旧的 host golang 与缓存
+make package/feeds/packages/golang/host/clean V=sc || true
+make package/golang/host/clean V=sc || true
+rm -rf build_dir/hostpkg/*golang* staging_dir/hostpkg/*go* dl/go*.tar.gz
+# 先单独把 golang/host 编好（会用 25.x）
+make package/feeds/packages/golang/host/compile V=sc
+
 rm -rf feeds/packages2/multimedia/aliyundrive-webdav
 rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
 git clone https://github.com/messense/aliyundrive-webdav.git
