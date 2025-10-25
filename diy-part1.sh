@@ -13,8 +13,6 @@
 wget https://github.com/coolsnowwolf/lede/raw/master/include/meson.mk  -P ./include/
 wget https://codeberg.org/aparcar/openwrt/src/branch/apk/include/openssl-engine.mk  -P ./include/
 
-rm -rf feeds/gl_feed_common/golang
-
 # Uncomment a feed source
 sed -i "/helloworld/d" "feeds.conf.default"
 
