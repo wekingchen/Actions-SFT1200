@@ -48,17 +48,13 @@ rm -rf packages
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/packages/lang/golang
 rm -rf feeds/packages2/lang/golang
+rm -rf feeds/gl_feed_common/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages2/lang/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
-
-# 清理旧的 host golang 与缓存
-make package/feeds/packages/golang/host/clean V=sc || true
-make package/golang/host/clean V=sc || true
-rm -rf build_dir/hostpkg/*golang* staging_dir/hostpkg/*go* dl/go*.tar.gz
-# 先单独把 golang/host 编好（会用 25.x）
-make package/feeds/packages/golang/host/compile V=sc
+sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 rm -rf feeds/packages2/multimedia/aliyundrive-webdav
 rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
