@@ -30,9 +30,9 @@ cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc' feeds/PWpackages/naiveproxy/Makefile
 
 # 将geoview版本固定到0.1.10
-sed -i 's/PKG_VERSION:=0.1.11/PKG_VERSION:=0.1.10/' feeds/packages2/net/geoview/Makefile
-sed -i 's/PKG_HASH:=a3ad07d3926c329f6990d67e17119f0c9a4ee26e89b0e2f541b27230c2806e94/PKG_HASH:=9221df928df68030893125a60bdf6d8a1fef2b199fa58ed80772cb3c17225fc5/' feeds/packages2/net/geoview/Makefile
-sed -i '/PKG_USE_MIPS16:=0/a PKG_BUILD_FLAGS:=no-mips16' feeds/packages2/net/geoview/Makefile
+# sed -i 's/PKG_VERSION:=0.1.11/PKG_VERSION:=0.1.10/' feeds/packages2/net/geoview/Makefile
+# sed -i 's/PKG_HASH:=a3ad07d3926c329f6990d67e17119f0c9a4ee26e89b0e2f541b27230c2806e94/PKG_HASH:=9221df928df68030893125a60bdf6d8a1fef2b199fa58ed80772cb3c17225fc5/' feeds/packages2/net/geoview/Makefile
+# sed -i '/PKG_USE_MIPS16:=0/a PKG_BUILD_FLAGS:=no-mips16' feeds/packages2/net/geoview/Makefile
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
