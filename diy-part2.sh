@@ -27,13 +27,11 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 修改naiveproxy编译源码以支持mips_siflower
-sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc' \
+# 1) 把 mips_siflower 映射为 mipsel_24kc-static（插在 riscv64_riscv64 分支之后）
+sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc-static' \
 feeds/PWpackages/naiveproxy/Makefile
-sed -i '/^PKG_SOURCE_URL:=/a ifeq ($(ARCH_PREBUILT),mipsel_24kc)\n  PKG_SOURCE:=naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT)-static.tar.xz\nendif' \
-feeds/PWpackages/naiveproxy/Makefile
-sed -i 's/PKG_HASH:=63b1f692d2643de026d1a53699a65e7f30ee5c226beaa6cc255189a7c04d5817/PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb/' \
-feeds/PWpackages/naiveproxy/Makefile
-sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
+# 2) 在 dummy 之前插入 mipsel_24kc-static 的 PKG_HASH 分支
+sed -i "/PKG_HASH:=dummy/i\else ifeq (\$(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb" \
 feeds/PWpackages/naiveproxy/Makefile
 
 rm -rf feeds/packages/devel/diffutils
