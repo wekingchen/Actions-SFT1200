@@ -27,15 +27,23 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 修改naiveproxy编译源码以支持mips_siflower
-# 1) mips_siflower -> mipsel_24kc-static  （插在 riscv64_riscv64 分支之后）
-sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc-static' \
+# 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
+sed -i '/else ifeq (\$(ARCH_PREBUILT),mips_siflower)/,+1 d' \
 feeds/PWpackages/naiveproxy/Makefile
 
-# 2) 在 PKG_HASH 选择链中，dummy 之前插入 mipsel_24kc-static 的哈希分支
-sed -i "/PKG_HASH:=dummy/i\else ifeq (\$(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb" \
+# 2) 把 mips_siflower -> mipsel_24kc-static 正确插到 “ARCH_PREBUILT:=riscv64” 这一行之后
+#    （注意：锚点是赋值行，而不是 “riscv64_riscv64)” 的条件行）
+sed -i '/^[[:space:]]*ARCH_PREBUILT:=riscv64[[:space:]]*$/a\
+else ifeq ($(ARCH_PREBUILT),mips_siflower)\
+  ARCH_PREBUILT:=mipsel_24kc-static' \
 feeds/PWpackages/naiveproxy/Makefile
 
-# 3) （推荐）让解包动作对齐 PKG_SOURCE，减少未来不一致风险
+# 3) 修复并收尾 PKG_HASH 分支
+sed -i '/^else ifeq (\$(ARCH_PREBUILT),x86_64)/,/^endif/ c\
+else ifeq ($(ARCH_PREBUILT),x86_64)\n  PKG_HASH:=d6c39befccb1f3ad54ffa11c5ae8ad11a90151998eeaae6b1a73cc0702f24966\nelse ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb\nelse\n  PKG_HASH:=dummy\nendif' \
+feeds/PWpackages/naiveproxy/Makefile
+
+# 4) （推荐）让解包动作使用 $(PKG_SOURCE)，避免文件名不同步
 sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
 feeds/PWpackages/naiveproxy/Makefile
 
