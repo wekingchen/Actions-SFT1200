@@ -27,12 +27,14 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 修改naiveproxy编译源码以支持mips_siflower
-sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc' feeds/PWpackages/naiveproxy/Makefile
-
-# 将geoview版本固定到0.1.10
-# sed -i 's/PKG_VERSION:=0.1.11/PKG_VERSION:=0.1.10/' feeds/packages2/net/geoview/Makefile
-# sed -i 's/PKG_HASH:=a3ad07d3926c329f6990d67e17119f0c9a4ee26e89b0e2f541b27230c2806e94/PKG_HASH:=9221df928df68030893125a60bdf6d8a1fef2b199fa58ed80772cb3c17225fc5/' feeds/packages2/net/geoview/Makefile
-# sed -i '/PKG_USE_MIPS16:=0/a PKG_BUILD_FLAGS:=no-mips16' feeds/packages2/net/geoview/Makefile
+sed -i '/riscv64_riscv64)/a\else ifeq ($(ARCH_PREBUILT),mips_siflower)\n  ARCH_PREBUILT:=mipsel_24kc' \
+feeds/PWpackages/naiveproxy/Makefile
+sed -i '/^PKG_SOURCE_URL:=/a ifeq ($(ARCH_PREBUILT),mipsel_24kc)\n  PKG_SOURCE:=naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT)-static.tar.xz\nendif' \
+feeds/PWpackages/naiveproxy/Makefile
+sed -i 's/PKG_HASH:=63b1f692d2643de026d1a53699a65e7f30ee5c226beaa6cc255189a7c04d5817/PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb/' \
+feeds/PWpackages/naiveproxy/Makefile
+sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
+feeds/PWpackages/naiveproxy/Makefile
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
