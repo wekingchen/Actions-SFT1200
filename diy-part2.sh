@@ -63,11 +63,12 @@ rm -rf feeds/gl_feed_common/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
-rm -rf feeds/packages2/multimedia/aliyundrive-webdav
-rm -rf feeds/luci2/applications/luci-app-aliyundrive-webdav
-git clone https://github.com/messense/aliyundrive-webdav.git
-cp -r aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
-cp -r aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
+# 增加阿里云盘WebDAV 及其 LuCI
+set -euo pipefail
+rm -rf feeds/packages2/multimedia/aliyundrive-webdav feeds/luci2/applications/luci-app-aliyundrive-webdav
+git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git aliyundrive-webdav
+cp -a aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
+cp -a aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
 
 # 拉取最后能编译的shadowsocks-rust
