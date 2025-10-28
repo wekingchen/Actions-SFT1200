@@ -59,14 +59,14 @@ cp -r packages/net/zerotier feeds/gl_feed_common
 rm -rf packages
 
 # 修改golang源码以编译xray1.8.8+版本
-rm -rf feeds/packages/lang/golang
-rm -rf feeds/packages2/lang/golang
+#rm -rf feeds/packages/lang/golang
+#rm -rf feeds/packages2/lang/golang
 rm -rf feeds/gl_feed_common/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages/lang/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages2/lang/golang
+#git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages/lang/golang
+#git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages2/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
-sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
-sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
+#sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
+#sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 rm -rf feeds/packages2/multimedia/aliyundrive-webdav
@@ -112,7 +112,6 @@ git clone https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app
 
 rm -rf package/libs/openssl
 rm -rf package/libs/ustream-ssl
-#wget 'https://github.com/201821143044/Actions-GL.iNet-OpenWrt/raw/main/myfiles/openssl.zip' --no-check-certificate && unzip -o openssl.zip && rm -f openssl.zip
 wget 'https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip' --no-check-certificate && unzip -o libs.zip && rm -f libs.zip
 wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
 
