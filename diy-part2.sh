@@ -59,14 +59,8 @@ cp -r packages/net/zerotier feeds/gl_feed_common
 rm -rf packages
 
 # 修改golang源码以编译xray1.8.8+版本
-#rm -rf feeds/packages/lang/golang
-#rm -rf feeds/packages2/lang/golang
 rm -rf feeds/gl_feed_common/golang
-#git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages/lang/golang
-#git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/packages2/lang/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
-#sed -i '/-linkmode external \\/d' feeds/packages/lang/golang/golang-package.mk
-#sed -i '/-linkmode external \\/d' feeds/packages2/lang/golang/golang-package.mk
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 rm -rf feeds/packages2/multimedia/aliyundrive-webdav
@@ -86,14 +80,14 @@ cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds
 rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 # 拉取最后能编译的shadowsocksr-libev
-wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0a943cab86e29dc -O helloworld.zip
-unzip helloworld.zip
-rm -rf feeds/helloworld/shadowsocksr-libev
-cp -r helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc/shadowsocksr-libev feeds/helloworld
-sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
-rm -rf feeds/PWpackages/shadowsocksr-libev
-cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
-rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
+# wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0a943cab86e29dc -O helloworld.zip
+# unzip helloworld.zip
+# rm -rf feeds/helloworld/shadowsocksr-libev
+# cp -r helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc/shadowsocksr-libev feeds/helloworld
+# sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
+# rm -rf feeds/PWpackages/shadowsocksr-libev
+# cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
+# rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
 
 # 拉取最后能编译的dns2tcp
 rm -rf feeds/helloworld/dns2tcp
