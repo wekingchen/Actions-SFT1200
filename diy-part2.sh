@@ -53,12 +53,17 @@ rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
 rm -rf feeds/gl_feed_common/zerotier
 rm -rf feeds/gl_feed_1806/haproxy
-git clone https://github.com/coolsnowwolf/packages.git
-cp -r packages/devel/diffutils feeds/packages/devel
-cp -r packages/utils/jq feeds/packages/utils
-cp -r packages/net/zerotier feeds/gl_feed_common
-cp -r packages/net/haproxy feeds/gl_feed_1806
-rm -rf packages
+cp -r feeds/packages2/devel/diffutils feeds/packages/devel
+cp -r feeds/packages2/utils/jq feeds/packages/utils
+cp -r feeds/packages2/net/zerotier feeds/gl_feed_common
+cp -r feeds/packages2/net/haproxy feeds/gl_feed_1806
+
+# haproxy修改依赖支持到lua5.4
+sed -i -E \
+  -e 's/\+liblua5\.3/\+liblua5\.4/g' \
+  -e 's/LUA_LIB_NAME="?lua5\.3"?/LUA_LIB_NAME="lua5.4"/g' \
+  -e 's|/include/lua5\.3|/include/lua5.4|g' \
+  feeds/gl_feed_1806/haproxy/Makefile
 
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/gl_feed_common/golang
