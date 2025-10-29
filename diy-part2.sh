@@ -15,6 +15,7 @@ rm -rf feeds/packages2/net/v2ray-geodata
 rm -rf feeds/packages2/net/sing-box
 rm -rf feeds/packages2/net/chinadns-ng
 rm -rf feeds/packages2/net/dns2socks
+rm -rf feeds/packages2/net/dns2tcp
 rm -rf feeds/packages2/net/microsocks
 rm -rf feeds/packages/net/shadowsocks-libev
 cp -r feeds/packages2/lang/rust feeds/packages/lang
@@ -23,6 +24,7 @@ cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
 cp -r feeds/PWpackages/sing-box feeds/packages2/net
 cp -r feeds/PWpackages/chinadns-ng feeds/packages2/net
 cp -r feeds/PWpackages/dns2socks feeds/packages2/net
+cp -r feeds/PWpackages/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
@@ -80,23 +82,13 @@ rm -rf feeds/PWpackages/shadowsocks-rust
 cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
 rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
-# 拉取最后能编译的shadowsocksr-libev
-# wget https://codeload.github.com/fw876/helloworld/zip/ea2a48dd6a30450ab84079a0c0a943cab86e29dc -O helloworld.zip
-# unzip helloworld.zip
-# rm -rf feeds/helloworld/shadowsocksr-libev
-# cp -r helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc/shadowsocksr-libev feeds/helloworld
-# sed -i '/DEPENDS:=+libev +libsodium +libopenssl +libpthread +libpcre +libudns +zlib +libopenssl-legacy/s/ +libopenssl-legacy//' feeds/helloworld/shadowsocksr-libev/Makefile
-# rm -rf feeds/PWpackages/shadowsocksr-libev
-# cp -r feeds/helloworld/shadowsocksr-libev feeds/PWpackages
-# rm -rf helloworld.zip helloworld-ea2a48dd6a30450ab84079a0c0a943cab86e29dc
-
 # 拉取最后能编译的dns2tcp
-rm -rf feeds/helloworld/dns2tcp
-rm -rf feeds/PWpackages/dns2tcp
-git clone https://github.com/sbwml/openwrt_helloworld
-cp -r openwrt_helloworld/dns2tcp feeds/helloworld
-cp -r openwrt_helloworld/dns2tcp feeds/PWpackages
-rm -rf openwrt_helloworld
+# rm -rf feeds/helloworld/dns2tcp
+# rm -rf feeds/PWpackages/dns2tcp
+# git clone https://github.com/sbwml/openwrt_helloworld
+# cp -r openwrt_helloworld/dns2tcp feeds/helloworld
+# cp -r openwrt_helloworld/dns2tcp feeds/PWpackages
+# rm -rf openwrt_helloworld
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
