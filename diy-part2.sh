@@ -51,13 +51,13 @@ feeds/PWpackages/naiveproxy/Makefile
 
 rm -rf feeds/packages/devel/diffutils
 rm -rf feeds/packages/utils/jq
-rm -rf feeds/packages/net/zerotier
 rm -rf feeds/gl_feed_common/zerotier
+rm -rf feeds/gl_feed_1806/haproxy
 git clone https://github.com/coolsnowwolf/packages.git
 cp -r packages/devel/diffutils feeds/packages/devel
 cp -r packages/utils/jq feeds/packages/utils
-cp -r packages/net/zerotier feeds/packages/net
 cp -r packages/net/zerotier feeds/gl_feed_common
+cp -r packages/net/haproxy feeds/gl_feed_1806
 rm -rf packages
 
 # 修改golang源码以编译xray1.8.8+版本
