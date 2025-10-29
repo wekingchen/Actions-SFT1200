@@ -24,7 +24,7 @@ cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
 cp -r feeds/PWpackages/sing-box feeds/packages2/net
 cp -r feeds/PWpackages/chinadns-ng feeds/packages2/net
 cp -r feeds/PWpackages/dns2socks feeds/packages2/net
-cp -r feeds/PWpackages/dns2tcp feeds/packages2/net
+cp -r feeds/helloworld/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
