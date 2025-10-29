@@ -113,12 +113,14 @@ wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9ef
 # 修复 host ncurses 静态库 relocation 错误
 sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' package/libs/ncurses/Makefile
 
-# 清理老的 hostpkg ncurses
-rm -rf build_dir/hostpkg/ncurses*
-rm -rf staging_dir/hostpkg/lib/libncurses*
+# 清理老的 hostpkg ncurses —— 用内置目标更安全，且不存在也不会失败
+make package/ncurses/host/clean || true
 
-# 强制只用动态库
-find staging_dir/hostpkg/lib/ -name "libncurses.a" -delete
-find staging_dir/hostpkg/lib/ -name "libpanel.a" -delete
+# 强制只用动态库 —— 目录不存在时直接跳过，避免 find 报错
+if [ -d staging_dir/hostpkg/lib ]; then
+  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
+  find staging_dir/hostpkg/lib -type f -name 'libpanel.a'   -delete || true
+fi
 
-export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:$LD_LIBRARY_PATH"
+# 运行时库搜索路径（LD_LIBRARY_PATH 可能为空，给默认值）
+export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:${LD_LIBRARY_PATH:-}"
