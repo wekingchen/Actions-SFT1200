@@ -1,11 +1,7 @@
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
+# Copyright (c) 2019-2020 P3TERX
+# MIT License
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
-#
 
 name: Build OpenWrt
 
@@ -193,30 +189,30 @@ jobs:
         PARENT_BASENAME="$(basename "$(dirname "$LIB_DIR")")"   # 可能是 usr，也可能不是
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
 
-        # 2) 推导 MUSL_ROOT_mipsel_* 并按实际布局做对应校验
+        # 2) 推导 MUSL_ROOT_mipsel_* 并按实际布局做对应校验（只用下划线版本）
         if [ "$PARENT_BASENAME" = "usr" ]; then
           # 布局：…/usr/lib/libc.a → MUSL_ROOT 指向 …/usr；校验 $USR/lib/libc.a
           MUSL_USR="$(dirname "$LIB_DIR")"                      # …/usr
           echo "DETECTED_TARGET_MUSL_USR=$MUSL_USR"
           echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_USR" >> $GITHUB_ENV
-          echo "MUSL_ROOT_mipsel-unknown-linux-musl=$MUSL_USR" >> $GITHUB_ENV
           test -f "$MUSL_USR/lib/libc.a" || { echo "FATAL: $MUSL_USR/lib/libc.a not found"; exit 2; }
         else
           # 布局：…/lib/libc.a → MUSL_ROOT 指向 …/lib；校验 $LIB/libc.a（不再多加一层 lib）
           MUSL_LIB="$LIB_DIR"
           echo "DETECTED_TARGET_MUSL_LIB=$MUSL_LIB"
           echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_LIB" >> $GITHUB_ENV
-          echo "MUSL_ROOT_mipsel-unknown-linux-musl=$MUSL_LIB" >> $GITHUB_ENV
           test -f "$MUSL_LIB/libc.a" || { echo "FATAL: $MUSL_LIB/libc.a not found"; exit 2; }
         fi
 
-        # Host 侧也保留（有些脚本会读取）
+        # Host 侧兜底（只用下划线版本）
         echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
-        echo "MUSL_ROOT_x86_64-unknown-linux-musl=/opt/musl" >> $GITHUB_ENV
 
-        # 同时再次校验 host 侧
+        # 再校验 host 侧
         : "${MUSL_ROOT:=/opt/musl}"
         test -f "${MUSL_ROOT}/lib/libc.a" || { echo "FATAL: ${MUSL_ROOT}/lib/libc.a not found"; ls -l "${MUSL_ROOT}/lib" || true; exit 2; }
+
+        # 自检：确保没有非法名字（带 -）
+        env | grep -E '^MUSL_ROOT_.*-' && { echo "FATAL: illegal env var with '-' found above"; exit 2; } || true
     # --------------------------------------------------------------------
 
     - name: SSH connection to Actions
@@ -231,24 +227,24 @@ jobs:
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
-        
+
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"    
-        # 显式传入 MUSL 相关变量（防止环境被清理）
+        echo -e "$(nproc) thread compile"
+        # 显式传入 MUSL 相关变量（注意：只能用下划线变量名）
         MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" \
         RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" \
         MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
-        MUSL_ROOT_mipsel-unknown-linux-musl="${MUSL_ROOT_mipsel-unknown-linux-musl}" \
+        MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl:-/opt/musl}" \
         make -j$(nproc) V=s
         # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-
+    
     - name: Check space usage
       if: (!cancelled())
       run: df -hT
