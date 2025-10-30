@@ -116,6 +116,8 @@ jobs:
         sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
         echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
         echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
+        # Host MUSL_ROOT（下划线变量名）
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
     # -------------------------------------------------------------------
 
     - name: Clone source code
@@ -164,7 +166,7 @@ jobs:
         make toolchain/install -j"$(nproc)"
 
     # ---------- 关键修复步骤：探测并验证 mipsel musl ROOT ----------
-    - name: Detect mipsel musl sysroot & verify
+    - name: Detect mipsel musl sysroot & export MUSL_ROOT_* (robust)
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
@@ -172,13 +174,13 @@ jobs:
 
         echo ">>> Searching mipsel-musl libc.a in $ROOT..."
         MIPS_LIBC=$(
-          find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
+          find "$ROOT" -maxdepth 8 -type f -name 'libc.a' \
           -path '*mipsel*musl*/lib/libc.a' \
           | grep 'toolchain-mipsel' -m1 || true
         )
         if [ -z "${MIPS_LIBC:-}" ]; then
           MIPS_LIBC=$(
-            find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
+            find "$ROOT" -maxdepth 8 -type f -name 'libc.a' \
             -path '*mipsel*musl*/lib/libc.a' \
             | grep 'target-mipsel' -m1 || true
           )
@@ -188,23 +190,21 @@ jobs:
         fi
 
         LIB_DIR="$(dirname "$MIPS_LIBC")"
-        MUSL_ROOT_CAND="$(dirname "$LIB_DIR")"
-        TEST_PATH="$MUSL_ROOT_CAND/lib/libc.a"
+        MUSL_ROOT_CAND="$(dirname "$LIB_DIR")"   # 包含 lib/ 的上一级
+        TEST="$MUSL_ROOT_CAND/lib/libc.a"
 
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
-        echo "DETECTED_MUSL_ROOT_CAND=$MUSL_ROOT_CAND"
+        echo "DETECTED_MUSL_ROOT=$MUSL_ROOT_CAND"
         ls -l "$LIB_DIR" || true
 
-        test -f "$TEST_PATH" || { echo "FATAL: expected libc at $TEST_PATH"; exit 2; }
+        test -f "$TEST" || { echo "FATAL: expected $TEST"; ls -l "$(dirname "$TEST")" || true; exit 2; }
 
+        # 目标三元组：unknown 与 openwrt 两种 vendor 变体（全部下划线）
         echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
+        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
 
-        : "${MUSL_ROOT:=/opt/musl}"
-        test -f "${MUSL_ROOT}/lib/libc.a" || { echo "FATAL: ${MUSL_ROOT}/lib/libc.a not found"; ls -l "${MUSL_ROOT}/lib" || true; exit 2; }
-
+        # 自检：禁止带 '-' 的变量名
         env | grep -E '^MUSL_ROOT_.*-' && { echo "FATAL: illegal env var with '-' found above"; exit 2; } || true
-    # -------------------------------------------------------------------
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -219,24 +219,32 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
 
+    # ---------- Fail-fast：防止空变量 / 路径错误 ----------
+    - name: Sanity check MUSL_ROOT before build
+      run: |
+        set -eux
+        : "${MUSL_ROOT_x86_64_unknown_linux_musl:?EMPTY}"
+        test -f "${MUSL_ROOT_x86_64_unknown_linux_musl}/lib/libc.a"
+        : "${MUSL_ROOT_mipsel_unknown_linux_musl:?EMPTY}"
+        test -f "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib/libc.a"
+        # openwrt 变体可选，但存在则必须有效
+        if [ -n "${MUSL_ROOT_mipsel_openwrt_linux_musl:-}" ]; then
+          test -f "${MUSL_ROOT_mipsel_openwrt_linux_musl}/lib/libc.a"
+        fi
+
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
-
-        # fail-fast：确保探测步骤生效
-        : "${MUSL_ROOT_mipsel_unknown_linux_musl:?MUSL_ROOT_mipsel_unknown_linux_musl is EMPTY. Did Detect step run?}"
-        ls -ld "$MUSL_ROOT_mipsel_unknown_linux_musl" || true
-        test -f "$MUSL_ROOT_mipsel_unknown_linux_musl/lib/libc.a" || { echo "FATAL: missing $MUSL_ROOT_mipsel_unknown_linux_musl/lib/libc.a"; exit 2; }
-
         # 显式传入 MUSL 相关变量（仅下划线命名）
         MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" \
         RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" \
+        MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl}" \
         MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
-        MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl:-/opt/musl}" \
+        MUSL_ROOT_mipsel_openwrt_linux_musl="${MUSL_ROOT_mipsel_openwrt_linux_musl:-${MUSL_ROOT_mipsel_unknown_linux_musl}}" \
         make -j$(nproc) V=s
-
+        # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
