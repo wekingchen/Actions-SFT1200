@@ -1,12 +1,6 @@
-#
 # Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# Description: Build OpenWrt using GitHub Actions
-#
+# MIT License
+# Build OpenWrt using GitHub Actions
 
 name: Build OpenWrt
 
@@ -102,6 +96,26 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
 
+    # ---------------------- 新增：规范化 MUSL_ROOT（Rust bootstrap 关键） ----------------------
+    - name: Prepare musl for Rust bootstrap
+      run: |
+        set -eux
+        sudo apt-get update
+        sudo apt-get install -y musl-tools musl-dev
+        # 标准化一个 MUSL_ROOT 供 Rust bootstrap 查找
+        sudo mkdir -p /opt/musl
+        sudo ln -sfn /usr/include /opt/musl/include
+        # 自动探测 musl-dev 提供的 libc.a 目录，并把 /opt/musl/lib 链过去
+        LIBC_A=$(dpkg -L musl-dev | grep '/libc\.a$' | head -n1 || true)
+        if [ -z "$LIBC_A" ]; then
+          echo "musl-dev installed but libc.a not found"; exit 1;
+        fi
+        sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
+        # 导出环境变量，供后续 make / rust bootstrap 使用
+        echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
+        echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
+    # -----------------------------------------------------------------------------------------
+
     - name: Clone source code
       working-directory: ./
       run: |
@@ -135,6 +149,14 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    # ---------------------- 新增：在编译前做 defconfig（收敛循环/自选依赖） ----------------------
+    - name: Normalize OpenWrt config (defconfig)
+      run: |
+        set -eux
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        make defconfig
+    # -----------------------------------------------------------------------------------------
+
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
       if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
@@ -151,10 +173,13 @@ jobs:
     - name: Compile the firmware
       id: compile
       run: |
+        set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"    
-        make -j$(nproc) V=s
-        # make -j1 V=s
+        echo -e "$(nproc) thread compile"
+        # 先并行快速编译，失败再降级到单线程 + V=s 抓第一现场
+        if ! make -j"$(nproc)"; then
+          make -j1 V=s
+        fi
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
