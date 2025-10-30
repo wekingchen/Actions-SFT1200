@@ -1,3 +1,12 @@
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions
+#
+
 name: Build OpenWrt
 
 on:
@@ -10,6 +19,7 @@ on:
         default: 'false'
 
 env:
+  # REPO_URL: https://github.com/gl-inet/gl-infra-builder
   REPO_URL: https://github.com/201821143044/gl-infra-builder-new
   REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
@@ -30,12 +40,13 @@ jobs:
     steps:
     - name: Before freeing up disk space
       run: |
+        echo "Before freeing up disk space"
         echo "=============================================================================="
         df -hT
         echo "=============================================================================="
 
-    - name: Optimize Disk Space
-      uses: hugoalh/disk-space-optimizer-ghaction@v0.8.1
+    - name: "Optimize Disk Space"
+      uses: "hugoalh/disk-space-optimizer-ghaction@v0.8.1"
       with:
         operate_sudo: "True"
         general_include: ".+"
@@ -68,6 +79,7 @@ jobs:
 
     - name: Free up disk space complete
       run: |
+        echo "Free up disk space complete"
         echo "=============================================================================="
         df -hT
         echo "=============================================================================="
@@ -89,7 +101,7 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
 
-    # =============== Host 侧兜底：规范化 MUSL_ROOT（供 Rust 自检） ===============
+    # ---------- 新增：Host 侧兜底，规范化 MUSL_ROOT 到 /opt/musl ----------
     - name: Prepare musl for Rust bootstrap (host fallback)
       run: |
         set -eux
@@ -104,19 +116,18 @@ jobs:
         sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
         echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
         echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
-    # ============================================================================
+    # -------------------------------------------------------------------
 
     - name: Clone source code
+      working-directory: ./
       run: |
-        set -eux
         df -hT $PWD
         git clone $REPO_URL -b $REPO_BRANCH openwrt
         ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
         git config --global user.email "you@example.com"
         git config --global user.name "Your Name"
-        python3 setup.py -c ./configs/config-siflower-18.x.yml
-        cd openwrt-18.06/siflower/openwrt-18.06
+        python3 setup.py -c ./configs/config-siflower-18.x.yml && cd openwrt-18.06/siflower/openwrt-18.06
         ./scripts/gen_config.py target_siflower_gl-sft1200 luci
 
     - name: Load custom feeds
@@ -140,72 +151,73 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
+    # ---------- 新增：收敛 Kconfig 循环/自选依赖 ----------
     - name: Normalize OpenWrt config (defconfig)
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make defconfig
+    # ------------------------------------------------------
 
-    # ==================== 仅构建工具链（生成 mipsel sysroot） ====================
+    # ---------- 新增：仅构建 toolchain + 探测 mipsel sysroot 并校验 ----------
     - name: Build OpenWrt toolchain only
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make toolchain/install -j"$(nproc)"
-    # ============================================================================
 
-    # ========== 探测 mipsel-linux-musl 的 sysroot 并导出 target 专用变量 ==========
-    - name: Detect mipsel musl sysroot & export MUSL_ROOT_mipsel_*
+    - name: Detect mipsel musl sysroot & verify
       run: |
-        set -eux
-        ROOT="openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir"
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        ROOT="staging_dir"
 
-        # 优先使用 toolchain 的 sysroot，其次 target 的 sysroot
-        MIPS_SYSROOT=""
-        if [ -d "$ROOT" ]; then
-          # 典型：staging_dir/toolchain-mipsel_*/lib/libc.a 或 */usr/lib/libc.a
-          CANDS=$(grep -rsl --include='libc.a' '' "$ROOT" || true)
-          # 优先包含 'toolchain-mipsel' 且带 'musl'
-          MIPS_SYSROOT=$(echo "$CANDS" | grep 'toolchain-mipsel' | grep 'musl' | head -n1 || true)
-          if [ -z "$MIPS_SYSROOT" ]; then
-            MIPS_SYSROOT=$(echo "$CANDS" | grep 'target-mipsel' | grep 'musl' | head -n1 || true)
-          fi
+        # 1) 在 staging_dir 中查找 mipsel+musl 的 libc.a（优先 toolchain，再退 target）
+        MIPS_LIBC=$(
+          find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
+          -path '*mipsel*musl*/lib/libc.a' \
+          | grep 'toolchain-mipsel' -m1 || true
+        )
+        if [ -z "${MIPS_LIBC:-}" ]; then
+          MIPS_LIBC=$(
+            find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
+            -path '*mipsel*musl*/lib/libc.a' \
+            | grep 'target-mipsel' -m1 || true
+          )
+        fi
+        if [ -z "${MIPS_LIBC:-}" ]; then
+          echo "FATAL: cannot locate mipsel musl libc.a in $ROOT"; exit 3
         fi
 
-        if [ -z "$MIPS_SYSROOT" ]; then
-          echo "FATAL: mipsel musl libc.a not found under $ROOT"; exit 3;
+        LIB_DIR="$(dirname "$MIPS_LIBC")"                       # …/lib
+        PARENT_BASENAME="$(basename "$(dirname "$LIB_DIR")")"   # 可能是 usr，也可能不是
+        echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
+
+        # 2) 推导 MUSL_ROOT_mipsel_* 并按实际布局做对应校验
+        if [ "$PARENT_BASENAME" = "usr" ]; then
+          # 布局：…/usr/lib/libc.a → MUSL_ROOT 指向 …/usr；校验 $USR/lib/libc.a
+          MUSL_USR="$(dirname "$LIB_DIR")"                      # …/usr
+          echo "DETECTED_TARGET_MUSL_USR=$MUSL_USR"
+          echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_USR" >> $GITHUB_ENV
+          echo "MUSL_ROOT_mipsel-unknown-linux-musl=$MUSL_USR" >> $GITHUB_ENV
+          test -f "$MUSL_USR/lib/libc.a" || { echo "FATAL: $MUSL_USR/lib/libc.a not found"; exit 2; }
+        else
+          # 布局：…/lib/libc.a → MUSL_ROOT 指向 …/lib；校验 $LIB/libc.a（不再多加一层 lib）
+          MUSL_LIB="$LIB_DIR"
+          echo "DETECTED_TARGET_MUSL_LIB=$MUSL_LIB"
+          echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_LIB" >> $GITHUB_ENV
+          echo "MUSL_ROOT_mipsel-unknown-linux-musl=$MUSL_LIB" >> $GITHUB_ENV
+          test -f "$MUSL_LIB/libc.a" || { echo "FATAL: $MUSL_LIB/libc.a not found"; exit 2; }
         fi
 
-        # 推导 sysroot 的 'usr' 目录：如果 libc.a 位于 .../usr/lib/libc.a，则 MUSL_ROOT 指向 .../usr
-        LIB_DIR=$(dirname "$MIPS_SYSROOT")                    # .../lib
-        USR_DIR=$(dirname "$LIB_DIR")                         # .../usr
-        if [ "$(basename "$USR_DIR")" != "usr" ]; then
-          # 有些布局是 .../lib/libc.a（无 usr），那就让 MUSL_ROOT 指向上级并补一个 usr
-          USR_DIR="$LIB_DIR"
-        fi
-
-        echo "DETECTED_TARGET_MUSL_USR=${USR_DIR}"
-        echo "MUSL_ROOT_mipsel_unknown_linux_musl=${USR_DIR}" >> $GITHUB_ENV
-        echo "MUSL_ROOT_mipsel-unknown-linux-musl=${USR_DIR}" >> $GITHUB_ENV
-
-        # 同时把 host 的也带上（有些脚本会顺手检查）
+        # Host 侧也保留（有些脚本会读取）
         echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
         echo "MUSL_ROOT_x86_64-unknown-linux-musl=/opt/musl" >> $GITHUB_ENV
-    # ============================================================================
 
-    # ============================ fail-fast 双侧校验 =============================
-    - name: Verify MUSL roots (host & mipsel target)
-      run: |
-        set -eux
+        # 同时再次校验 host 侧
         : "${MUSL_ROOT:=/opt/musl}"
-        test -f "${MUSL_ROOT}/lib/libc.a" || (ls -l "${MUSL_ROOT}/lib" || true; exit 2)
-        for V in MUSL_ROOT_mipsel_unknown_linux_musl MUSL_ROOT_mipsel-unknown-linux-musl; do
-          if [ -z "${!V:-}" ]; then
-            echo "FATAL: $V not set"; exit 2
-          fi
-          test -f "${!V}/lib/libc.a" || (echo "$V=${!V}"; ls -l "${!V}/lib" || true; exit 2)
-        done
-    # ============================================================================
+        test -f "${MUSL_ROOT}/lib/libc.a" || { echo "FATAL: ${MUSL_ROOT}/lib/libc.a not found"; ls -l "${MUSL_ROOT}/lib" || true; exit 2; }
+    # --------------------------------------------------------------------
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -223,23 +235,15 @@ jobs:
     - name: Compile the firmware
       id: compile
       run: |
-        set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"
-
-        ENVVARS=(
-          MUSL_ROOT="${MUSL_ROOT:-/opt/musl}"
-          RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}"
-          MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}"
-          MUSL_ROOT_mipsel-unknown-linux-musl="${MUSL_ROOT_mipsel-unknown-linux-musl}"
-          MUSL_ROOT_x86_64_unknown_linux_musl="/opt/musl"
-          MUSL_ROOT_x86_64-unknown-linux-musl="/opt/musl"
-        )
-
-        if ! "${ENVVARS[@]}" make -j"$(nproc)"; then
-          "${ENVVARS[@]}" make -j1 V=s
-        fi
-
+        echo -e "$(nproc) thread compile"    
+        # 显式传入 MUSL 相关变量（防止环境被清理）
+        MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" \
+        RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" \
+        MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
+        MUSL_ROOT_mipsel-unknown-linux-musl="${MUSL_ROOT_mipsel-unknown-linux-musl}" \
+        make -j$(nproc) V=s
+        # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
@@ -271,6 +275,24 @@ jobs:
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
+
+    - name: Upload firmware to cowtransfer
+      id: cowtransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: Upload firmware to WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
     - name: Generate release tag
       id: tag
