@@ -1,4 +1,4 @@
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# Copyright (c) 2019-2020 P3TERX
 # MIT License
 # Build OpenWrt using GitHub Actions
 
@@ -40,8 +40,8 @@ jobs:
         df -hT
         echo "=============================================================================="
 
-    - name: "Optimize Disk Space"
-      uses: "hugoalh/disk-space-optimizer-ghaction@v0.8.1"
+    - name: Optimize Disk Space
+      uses: hugoalh/disk-space-optimizer-ghaction@v0.8.1
       with:
         operate_sudo: "True"
         general_include: ".+"
@@ -96,25 +96,42 @@ jobs:
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
 
-    # ---------------------- 新增：规范化 MUSL_ROOT（Rust bootstrap 关键） ----------------------
+    # ---------- 新增：规范化 MUSL_ROOT（Rust bootstrap 关键） ----------
     - name: Prepare musl for Rust bootstrap
       run: |
         set -eux
         sudo apt-get update
         sudo apt-get install -y musl-tools musl-dev
-        # 标准化一个 MUSL_ROOT 供 Rust bootstrap 查找
+
+        # 标准化的 MUSL_ROOT：/opt/musl
         sudo mkdir -p /opt/musl
         sudo ln -sfn /usr/include /opt/musl/include
-        # 自动探测 musl-dev 提供的 libc.a 目录，并把 /opt/musl/lib 链过去
+
+        # 自动探测 musl-dev 的 libc.a 目录，并将 /opt/musl/lib 链接过去
         LIBC_A=$(dpkg -L musl-dev | grep '/libc\.a$' | head -n1 || true)
         if [ -z "$LIBC_A" ]; then
           echo "musl-dev installed but libc.a not found"; exit 1;
         fi
         sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
-        # 导出环境变量，供后续 make / rust bootstrap 使用
+
+        # 导出到后续步骤
         echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
         echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
-    # -----------------------------------------------------------------------------------------
+    # ------------------------------------------------------------------
+
+    # ---------- 新增：在 make 之前强制校验，缺少就 fail-fast ----------
+    - name: Verify MUSL_ROOT for Rust bootstrap (fail fast)
+      run: |
+        set -eux
+        echo "MUSL_ROOT=${MUSL_ROOT:-/opt/musl}"
+        if [ ! -d "${MUSL_ROOT:-/opt/musl}/lib" ]; then
+          echo "Directory ${MUSL_ROOT:-/opt/musl}/lib not found"; ls -l "${MUSL_ROOT:-/opt/musl}" || true; exit 2;
+        fi
+        ls -l "${MUSL_ROOT:-/opt/musl}/lib" || true
+        if [ ! -f "${MUSL_ROOT:-/opt/musl}/lib/libc.a" ]; then
+          echo "FATAL: ${MUSL_ROOT:-/opt/musl}/lib/libc.a not found"; exit 2;
+        fi
+    # ------------------------------------------------------------------
 
     - name: Clone source code
       working-directory: ./
@@ -149,13 +166,13 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
 
-    # ---------------------- 新增：在编译前做 defconfig（收敛循环/自选依赖） ----------------------
+    # ---------- 建议：收敛 Kconfig 循环/自选依赖 ----------
     - name: Normalize OpenWrt config (defconfig)
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make defconfig
-    # -----------------------------------------------------------------------------------------
+    # ------------------------------------------------------
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -176,9 +193,9 @@ jobs:
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
-        # 先并行快速编译，失败再降级到单线程 + V=s 抓第一现场
-        if ! make -j"$(nproc)"; then
-          make -j1 V=s
+        # 显式把 MUSL_ROOT / RUST_MUSL_ROOT 传给 make
+        if ! MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" make -j"$(nproc)"; then
+          MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" make -j1 V=s
         fi
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
