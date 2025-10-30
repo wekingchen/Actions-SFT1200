@@ -165,23 +165,22 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make toolchain/install -j"$(nproc)"
 
-    # ---------- 关键修复步骤：探测并验证 mipsel musl ROOT ----------
-    - name: Detect mipsel musl sysroot & export MUSL_ROOT_* (robust)
+    # ---------- 关键修复步骤：探测并制作稳定 MUSL_ROOT 垫片（绝对路径） ----------
+    - name: Detect mipsel musl sysroot & make stable MUSL shim
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         ROOT="staging_dir"
 
         echo ">>> Searching mipsel-musl libc.a in $ROOT..."
+        # 先找 toolchain，再退 target
         MIPS_LIBC=$(
-          find "$ROOT" -maxdepth 8 -type f -name 'libc.a' \
-          -path '*mipsel*musl*/lib/libc.a' \
+          find "$ROOT" -maxdepth 9 -type f -name 'libc.a' -path '*mipsel*musl*/lib/libc.a' \
           | grep 'toolchain-mipsel' -m1 || true
         )
         if [ -z "${MIPS_LIBC:-}" ]; then
           MIPS_LIBC=$(
-            find "$ROOT" -maxdepth 8 -type f -name 'libc.a' \
-            -path '*mipsel*musl*/lib/libc.a' \
+            find "$ROOT" -maxdepth 9 -type f -name 'libc.a' -path '*mipsel*musl*/lib/libc.a' \
             | grep 'target-mipsel' -m1 || true
           )
         fi
@@ -189,22 +188,52 @@ jobs:
           echo "FATAL: cannot locate mipsel musl libc.a in $ROOT"; exit 3
         fi
 
-        LIB_DIR="$(dirname "$MIPS_LIBC")"
-        MUSL_ROOT_CAND="$(dirname "$LIB_DIR")"   # 包含 lib/ 的上一级
-        TEST="$MUSL_ROOT_CAND/lib/libc.a"
-
+        LIB_DIR="$(dirname "$MIPS_LIBC")"         # …/musl/lib
+        SYSROOT_DIR="$(dirname "$LIB_DIR")"       # …/musl
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
-        echo "DETECTED_MUSL_ROOT=$MUSL_ROOT_CAND"
-        ls -l "$LIB_DIR" || true
+        echo "DETECTED_SYSROOT_DIR=$SYSROOT_DIR"
+        test -f "$SYSROOT_DIR/lib/libc.a"
 
-        test -f "$TEST" || { echo "FATAL: expected $TEST"; ls -l "$(dirname "$TEST")" || true; exit 2; }
+        # 头文件目录：优先 …/musl/include；找不到再回退到 toolchain/include
+        INC_DIR_CAND="$SYSROOT_DIR/include"
+        if [ ! -d "$INC_DIR_CAND" ]; then
+          INC_DIR_CAND=$(dirname "$(find "$ROOT" -maxdepth 9 -type f \( -name 'stdio.h' -o -name 'features.h' \) -path '*musl*/include/*' | head -n1)") || true
+        fi
+        if [ -z "${INC_DIR_CAND:-}" ] || [ ! -d "$INC_DIR_CAND" ]; then
+          INC_DIR_CAND=$(dirname "$(find "$ROOT" -maxdepth 6 -type f -name 'stdio.h' -path '*toolchain-mipsel*include/*' | head -n1)") || true
+        fi
+        echo "DETECTED_INC_DIR=$INC_DIR_CAND"
+        [ -d "$INC_DIR_CAND" ] || { echo "FATAL: cannot locate musl include dir"; exit 2; }
 
-        # 目标三元组：unknown 与 openwrt 两种 vendor 变体（全部下划线）
-        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
-        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
+        # 造“垫片目录”：固定形态 <shim_root>/{lib,include} → 都是符号链接（写绝对路径）
+        SHIM_BASE="$GITHUB_WORKSPACE/musl-roots"
+        mkdir -p "$SHIM_BASE"
+        SHIM_MIPSEL="$(realpath -m "$SHIM_BASE/mipsel-unknown-linux-musl")"
+        SHIM_OPENWRT="$(realpath -m "$SHIM_BASE/mipsel-openwrt-linux-musl")"
+        mkdir -p "$SHIM_MIPSEL" "$SHIM_OPENWRT"
 
-        # 自检：禁止带 '-' 的变量名
+        rm -f "$SHIM_MIPSEL/lib" "$SHIM_MIPSEL/include" || true
+        rm -f "$SHIM_OPENWRT/lib" "$SHIM_OPENWRT/include" || true
+
+        ln -sfn "$(realpath -m "$LIB_DIR")"      "$SHIM_MIPSEL/lib"
+        ln -sfn "$(realpath -m "$INC_DIR_CAND")" "$SHIM_MIPSEL/include"
+        ln -sfn "$(realpath -m "$LIB_DIR")"      "$SHIM_OPENWRT/lib"
+        ln -sfn "$(realpath -m "$INC_DIR_CAND")" "$SHIM_OPENWRT/include"
+
+        # 导出所有可能被读取到的 MUSL_ROOT_*（全部是绝对路径、下划线命名）
+        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$(realpath -m "$SHIM_MIPSEL")"  >> $GITHUB_ENV
+        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$(realpath -m "$SHIM_OPENWRT")" >> $GITHUB_ENV
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"                      >> $GITHUB_ENV
+
+        # 可视化输出（便于核对）
+        echo "==== SHIM (mipsel-unknown-linux-musl) ===="
+        ls -l "$SHIM_MIPSEL"
+        echo "==== SHIM (mipsel-openwrt-linux-musl) ===="
+        ls -l "$SHIM_OPENWRT"
+
+        # 禁止带 '-' 的变量名
         env | grep -E '^MUSL_ROOT_.*-' && { echo "FATAL: illegal env var with '-' found above"; exit 2; } || true
+    # -------------------------------------------------------------------
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -219,25 +248,24 @@ jobs:
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
 
-    # ---------- Fail-fast：防止空变量 / 路径错误 ----------
-    - name: Sanity check MUSL_ROOT before build
+    # ---------- Fail-fast：先进入工作目录再检查（避免相对路径踩坑） ----------
+    - name: Sanity check MUSL_ROOT shim before build
       run: |
         set -eux
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         : "${MUSL_ROOT_x86_64_unknown_linux_musl:?EMPTY}"
         test -f "${MUSL_ROOT_x86_64_unknown_linux_musl}/lib/libc.a"
         : "${MUSL_ROOT_mipsel_unknown_linux_musl:?EMPTY}"
         test -f "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib/libc.a"
-        # openwrt 变体可选，但存在则必须有效
-        if [ -n "${MUSL_ROOT_mipsel_openwrt_linux_musl:-}" ]; then
-          test -f "${MUSL_ROOT_mipsel_openwrt_linux_musl}/lib/libc.a"
-        fi
+        : "${MUSL_ROOT_mipsel_openwrt_linux_musl:?EMPTY}"
+        test -f "${MUSL_ROOT_mipsel_openwrt_linux_musl}/lib/libc.a"
 
     - name: Compile the firmware
       id: compile
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
-        # 显式传入 MUSL 相关变量（仅下划线命名）
+        # 显式传入 MUSL 相关变量（仅下划线命名；openwrt 变体兜底到 unknown）
         MUSL_ROOT="${MUSL_ROOT:-/opt/musl}" \
         RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" \
         MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl}" \
@@ -323,7 +351,7 @@ jobs:
 
     - name: Remove old Releases
       uses: dev-drprasad/delete-older-releases@v0.3.3
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled'
       with:
         keep_latest: 10
         delete_tags: true
