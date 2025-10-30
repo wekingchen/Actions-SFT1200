@@ -1,7 +1,11 @@
 # Copyright (c) 2019-2020 P3TERX
-# MIT License
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
+#
 
 name: Build OpenWrt
 
@@ -185,24 +189,23 @@ jobs:
           echo "FATAL: cannot locate mipsel musl libc.a in $ROOT"; exit 3
         fi
 
-        LIB_DIR="$(dirname "$MIPS_LIBC")"                       # …/lib
-        PARENT_BASENAME="$(basename "$(dirname "$LIB_DIR")")"   # 可能是 usr，也可能不是
+        LIB_DIR="$(dirname "$MIPS_LIBC")"                   # …/lib
+        PARENT_DIR="$(dirname "$LIB_DIR")"                  # 包含 lib/ 的上一级
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
+        echo "DETECTED_LIB_DIR=$LIB_DIR"
+        echo "DETECTED_PARENT_DIR=$PARENT_DIR"
 
-        # 2) 推导 MUSL_ROOT_mipsel_* 并按实际布局做对应校验（只用下划线版本）
-        if [ "$PARENT_BASENAME" = "usr" ]; then
-          # 布局：…/usr/lib/libc.a → MUSL_ROOT 指向 …/usr；校验 $USR/lib/libc.a
-          MUSL_USR="$(dirname "$LIB_DIR")"                      # …/usr
-          echo "DETECTED_TARGET_MUSL_USR=$MUSL_USR"
-          echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_USR" >> $GITHUB_ENV
-          test -f "$MUSL_USR/lib/libc.a" || { echo "FATAL: $MUSL_USR/lib/libc.a not found"; exit 2; }
-        else
-          # 布局：…/lib/libc.a → MUSL_ROOT 指向 …/lib；校验 $LIB/libc.a（不再多加一层 lib）
-          MUSL_LIB="$LIB_DIR"
-          echo "DETECTED_TARGET_MUSL_LIB=$MUSL_LIB"
-          echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_LIB" >> $GITHUB_ENV
-          test -f "$MUSL_LIB/libc.a" || { echo "FATAL: $MUSL_LIB/libc.a not found"; exit 2; }
+        # 统一将 MUSL_ROOT 指向“包含 lib/ 的上级目录”，确保 $MUSL_ROOT/lib/libc.a 存在
+        MUSL_ROOT_CAND="$PARENT_DIR"
+        TEST_PATH="$MUSL_ROOT_CAND/lib/libc.a"
+        if [ ! -f "$TEST_PATH" ]; then
+          echo "FATAL: expected libc at: $TEST_PATH"
+          ls -l "$(dirname "$TEST_PATH")" || true
+          exit 2
         fi
+
+        # 仅使用下划线变量名
+        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
 
         # Host 侧兜底（只用下划线版本）
         echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
@@ -211,7 +214,7 @@ jobs:
         : "${MUSL_ROOT:=/opt/musl}"
         test -f "${MUSL_ROOT}/lib/libc.a" || { echo "FATAL: ${MUSL_ROOT}/lib/libc.a not found"; ls -l "${MUSL_ROOT}/lib" || true; exit 2; }
 
-        # 自检：确保没有非法名字（带 -）
+        # 自检：不允许有带 '-' 的变量名
         env | grep -E '^MUSL_ROOT_.*-' && { echo "FATAL: illegal env var with '-' found above"; exit 2; } || true
     # --------------------------------------------------------------------
 
