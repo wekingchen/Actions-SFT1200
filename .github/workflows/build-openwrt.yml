@@ -1,11 +1,7 @@
 # Copyright (c) 2019-2020 P3TERX
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
+# MIT License
 # https://github.com/P3TERX/Actions-OpenWrt
 # Description: Build OpenWrt using GitHub Actions
-#
 
 name: Build OpenWrt
 
@@ -39,6 +35,7 @@ jobs:
 
     steps:
     - name: Before freeing up disk space
+      shell: bash
       run: |
         echo "Before freeing up disk space"
         echo "=============================================================================="
@@ -78,6 +75,7 @@ jobs:
         remove-docker-images: 'true'
 
     - name: Free up disk space complete
+      shell: bash
       run: |
         echo "Free up disk space complete"
         echo "=============================================================================="
@@ -88,42 +86,45 @@ jobs:
       uses: actions/checkout@main
 
     - name: Initialization environment
+      shell: bash
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
-        sudo add-apt-repository universe
+        sudo add-apt-repository -y universe
         sudo apt-get update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
-        sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
+        sudo chown "$USER:$GROUPS" "$GITHUB_WORKSPACE"
 
     # ---------- 新增：Host 侧兜底，规范化 MUSL_ROOT 到 /opt/musl ----------
     - name: Prepare musl for Rust bootstrap (host fallback)
+      shell: bash
       run: |
         set -eux
         sudo apt-get update
         sudo apt-get install -y musl-tools musl-dev
         sudo mkdir -p /opt/musl
         sudo ln -sfn /usr/include /opt/musl/include
-        LIBC_A=$(dpkg -L musl-dev | grep '/libc\.a$' | head -n1 || true)
+        LIBC_A="$(dpkg -L musl-dev | grep '/libc\.a$' | head -n1 || true)"
         if [ -z "$LIBC_A" ]; then
           echo "musl-dev installed but libc.a not found"; exit 1;
         fi
         sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
-        echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
-        echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
+        echo "MUSL_ROOT=/opt/musl" >> "$GITHUB_ENV"
+        echo "RUST_MUSL_ROOT=/opt/musl" >> "$GITHUB_ENV"
     # -------------------------------------------------------------------
 
     - name: Clone source code
+      shell: bash
       working-directory: ./
       run: |
-        df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
-        ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
+        df -hT "$PWD"
+        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
+        ln -sfn /openwrt "$GITHUB_WORKSPACE/openwrt"
         cd openwrt
         git config --global user.email "you@example.com"
         git config --global user.name "Your Name"
@@ -131,28 +132,37 @@ jobs:
         ./scripts/gen_config.py target_siflower_gl-sft1200 luci
 
     - name: Load custom feeds
+      shell: bash
       run: |
-        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
-        chmod +x $DIY_P1_SH
+        [ -e "$FEEDS_CONF" ] && mv "$FEEDS_CONF" openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
+        chmod +x "$DIY_P1_SH"
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        $GITHUB_WORKSPACE/$DIY_P1_SH
+        "$GITHUB_WORKSPACE/$DIY_P1_SH"
 
     - name: Update feeds
-      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
+      shell: bash
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        ./scripts/feeds update -a
 
     - name: Install feeds
-      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
+      shell: bash
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        ./scripts/feeds install -a
 
     - name: Load custom configuration
+      shell: bash
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
-        chmod +x $DIY_P2_SH
+        [ -e "$CONFIG_FILE" ] && mv "$CONFIG_FILE" openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+        chmod +x "$DIY_P2_SH"
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
     # ---------- 新增：收敛 Kconfig 循环/自选依赖 ----------
     - name: Normalize OpenWrt config (defconfig)
+      shell: bash
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
@@ -161,41 +171,39 @@ jobs:
 
     # ---------- 新增：仅构建 toolchain + 探测 mipsel sysroot 并校验 ----------
     - name: Build OpenWrt toolchain only
+      shell: bash
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make toolchain/install -j"$(nproc)"
 
     - name: Detect mipsel musl sysroot & verify
+      shell: bash
       run: |
         set -euo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         ROOT="staging_dir"
 
-        # 1) 在 staging_dir 中查找 mipsel+musl 的 libc.a（优先 toolchain，再退 target）
-        MIPS_LIBC=$(
-          find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
-          -path '*mipsel*musl*/lib/libc.a' \
-          | grep 'toolchain-mipsel' -m1 || true
-        )
+        # 找 mipsel+musl 的 libc.a（优先 toolchain，再退 target）
+        MIPS_LIBC=""
+        while IFS= read -r -d '' f; do
+          if echo "$f" | grep -q 'toolchain-mipsel'; then MIPS_LIBC="$f"; break; fi
+        done < <(find "$ROOT" -maxdepth 7 -type f -name 'libc.a' -path '*mipsel*musl*/lib/libc.a' -print0 2>/dev/null)
         if [ -z "${MIPS_LIBC:-}" ]; then
-          MIPS_LIBC=$(
-            find "$ROOT" -maxdepth 7 -type f -name 'libc.a' \
-            -path '*mipsel*musl*/lib/libc.a' \
-            | grep 'target-mipsel' -m1 || true
-          )
+          while IFS= read -r -d '' f; do
+            if echo "$f" | grep -q 'target-mipsel'; then MIPS_LIBC="$f"; break; fi
+          done < <(find "$ROOT" -maxdepth 7 -type f -name 'libc.a' -path '*mipsel*musl*/lib/libc.a' -print0 2>/dev/null)
         fi
         if [ -z "${MIPS_LIBC:-}" ]; then
           echo "FATAL: cannot locate mipsel musl libc.a in $ROOT"; exit 3
         fi
 
-        LIB_DIR="$(dirname "$MIPS_LIBC")"                   # …/lib
-        PARENT_DIR="$(dirname "$LIB_DIR")"                  # 包含 lib/ 的上一级
+        LIB_DIR="$(dirname "$MIPS_LIBC")"     # …/lib
+        PARENT_DIR="$(dirname "$LIB_DIR")"    # 包含 lib/ 的上一级
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
         echo "DETECTED_LIB_DIR=$LIB_DIR"
         echo "DETECTED_PARENT_DIR=$PARENT_DIR"
 
-        # 统一将 MUSL_ROOT 指向“包含 lib/ 的上级目录”，确保 $MUSL_ROOT/lib/libc.a 存在
         MUSL_ROOT_CAND="$PARENT_DIR"
         TEST_PATH="$MUSL_ROOT_CAND/lib/libc.a"
         if [ ! -f "$TEST_PATH" ]; then
@@ -204,17 +212,12 @@ jobs:
           exit 2
         fi
 
-        # 仅使用下划线变量名
-        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_CAND" >> $GITHUB_ENV
+        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_CAND" >> "$GITHUB_ENV"
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> "$GITHUB_ENV"
 
-        # Host 侧兜底（只用下划线版本）
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
-
-        # 再校验 host 侧
         : "${MUSL_ROOT:=/opt/musl}"
         test -f "${MUSL_ROOT}/lib/libc.a" || { echo "FATAL: ${MUSL_ROOT}/lib/libc.a not found"; ls -l "${MUSL_ROOT}/lib" || true; exit 2; }
 
-        # 自检：不允许有带 '-' 的变量名
         env | grep -E '^MUSL_ROOT_.*-' && { echo "FATAL: illegal env var with '-' found above"; exit 2; } || true
     # --------------------------------------------------------------------
 
@@ -227,12 +230,14 @@ jobs:
 
     - name: Download package
       id: package
+      shell: bash
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
 
     # ---------- 新增：强制给 Rust bootstrap 写入 musl-root（防止环境被清理） ----------
     - name: Patch Rust bootstrap musl-root (force, survives env clean)
+      shell: bash
       run: |
         set -eux
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
@@ -241,64 +246,73 @@ jobs:
 
         ROOT_PWD="$PWD"
         FOUND=0
-        # (A) 若已生成 bootstrap.toml，直接 patch
-        while IFS= read -r f; do
+
+        # (A) 若已生成 bootstrap.toml，直接 patch（不用进程替换）
+        while IFS= read -r -d '' f; do
           FOUND=1
           echo "[patch] target musl-root -> $f"
-          # 删除旧段后追加（避免重复段冲突）
-          sed -i '/^\[target\.mipsel-unknown-linux-musl\]/,/^\[/d' "$f" || true
-          sed -i '/^\[target\.x86_64-unknown-linux-musl\]/,/^\[/d' "$f" || true
-          {
-            echo "[target.mipsel-unknown-linux-musl]"
-            echo "musl-root = \"'"${MUSL_ROOT_mipsel_unknown_linux_musl}"'\""
-            echo ""
-            echo "[target.x86_64-unknown-linux-musl]"
-            echo "musl-root = \"/opt/musl\""
-          } >> "$f"
+          awk -v mips="${MUSL_ROOT_mipsel_unknown_linux_musl}" '
+            BEGIN{skip=0}
+            /^\[target\.mipsel-unknown-linux-musl\]/{skip=1}
+            /^\[target\.x86_64-unknown-linux-musl\]/{skip=1}
+            /^\[target\./{if(skip){skip=0}; print; next}
+            {if(!skip) print}
+            END{
+              print "[target.mipsel-unknown-linux-musl]"
+              print "musl-root = \"" mips "\""
+              print ""
+              print "[target.x86_64-unknown-linux-musl]"
+              print "musl-root = \"/opt/musl\""
+            }
+          ' "$f" > "$f.new"
+          mv -f "$f.new" "$f"
           echo "---- patched $f ----"
           tail -n 12 "$f" || true
-        done < <(find build_dir -type f -name 'bootstrap.toml' 2>/dev/null || true)
+        done < <(find build_dir -type f -name 'bootstrap.toml' -print0 2>/dev/null)
 
-        # (B) 若尚未生成，引入模板 config.toml（后续 bootstrap 会读取）
+        # (B) 若尚未生成，引入模板 config.toml（避免 Here-Doc，改用 printf）
         if [ "$FOUND" -eq 0 ]; then
-          for d in $(find dl -maxdepth 2 -type d -name 'rust*' 2>/dev/null; \
-                     find feeds -maxdepth 4 -type d -name 'rust' 2>/dev/null; \
-                     echo "$ROOT_PWD"); do
+          # 遍历可能的 rust 源码目录（存在就写一份，不存在也无害）
+          while IFS= read -r d; do
             cfg="$d/config.toml"
             echo "[patch] write template config.toml to $cfg"
             mkdir -p "$d"
-            cat > "$cfg" <<'EOF_CFG'
-# generated by workflow to force musl-root
-[build]
-
-[target.mipsel-unknown-linux-musl]
-musl-root = "__MIPS_MUSL__"
-
-[target.x86_64-unknown-linux-musl]
-musl-root = "/opt/musl"
-EOF_CFG
-            sed -i "s|__MIPS_MUSL__|${MUSL_ROOT_mipsel_unknown_linux_musl}|g" "$cfg"
-          done
+            printf '%s\n' \
+'[build]' \
+'' \
+'[target.mipsel-unknown-linux-musl]' \
+"musl-root = \"${MUSL_ROOT_mipsel_unknown_linux_musl}\"" \
+'' \
+'[target.x86_64-unknown-linux-musl]' \
+'musl-root = "/opt/musl"' \
+            > "$cfg"
+          done <<'LIST_END'
+dl
+feeds
+.
+LIST_END
         fi
 
         # 兜底导出 host 侧
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> "$GITHUB_ENV"
         echo "[env] MUSL_ROOT_mipsel_unknown_linux_musl=${MUSL_ROOT_mipsel_unknown_linux_musl}"
         echo "[env] MUSL_ROOT_x86_64_unknown_linux_musl=${MUSL_ROOT_x86_64_unknown_linux_musl:-/opt/musl}"
     # -----------------------------------------------------------------------------------
 
     # ---------- 新增：编译前 sanity 打印 ----------
     - name: Sanity — show MUSL roots & libc.a
+      shell: bash
       run: |
         set -eux
         echo "MUSL_ROOT_mipsel_unknown_linux_musl=${MUSL_ROOT_mipsel_unknown_linux_musl:-<unset>}"
         echo "MUSL_ROOT_x86_64_unknown_linux_musl=${MUSL_ROOT_x86_64_unknown_linux_musl:-<unset>}"
-        test -n "${MUSL_ROOT_mipsel_unknown_linux_musl:-}" && ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" || true
-        test -n "${MUSL_ROOT:-}" && ls -l "${MUSL_ROOT}/lib" || true
+        if [ -n "${MUSL_ROOT_mipsel_unknown_linux_musl:-}" ]; then ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" || true; fi
+        if [ -n "${MUSL_ROOT:-}" ]; then ls -l "${MUSL_ROOT}/lib" || true; fi
     # ---------------------------------------------
 
     - name: Compile the firmware
       id: compile
+      shell: bash
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
@@ -307,15 +321,16 @@ EOF_CFG
         RUST_MUSL_ROOT="${RUST_MUSL_ROOT:-/opt/musl}" \
         MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
         MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl:-/opt/musl}" \
-        make -j$(nproc) V=s
+        make -j"$(nproc)" V=s
         # make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
+        echo "status=success" >> "$GITHUB_OUTPUT"
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
-        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> "$GITHUB_ENV"
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> "$GITHUB_ENV"
     
     - name: Check space usage
       if: (!cancelled())
+      shell: bash
       run: df -hT
 
     - name: Upload bin directory
@@ -328,11 +343,12 @@ EOF_CFG
     - name: Organize files
       id: organize
       if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      shell: bash
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/*/*
         rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
+        echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
+        echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
@@ -344,30 +360,33 @@ EOF_CFG
     - name: Upload firmware to cowtransfer
       id: cowtransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      shell: bash
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
-        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
-        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+        ./transfer cow --block 2621440 -s -p 64 --no-progress "${FIRMWARE}" 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(grep https cowtransfer.log)"
+        echo "url=$(grep https cowtransfer.log | cut -f3 -d" ")" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to WeTransfer
       id: wetransfer
       if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      shell: bash
       run: |
         curl -fsSL git.io/file-transfer | sh
-        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
-        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
-        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+        ./transfer wet -s -p 16 --no-progress "${FIRMWARE}" 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(grep https wetransfer.log)"
+        echo "url=$(grep https wetransfer.log | cut -f3 -d" ")" >> "$GITHUB_OUTPUT"
 
     - name: Generate release tag
       id: tag
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      shell: bash
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> "$GITHUB_OUTPUT"
         touch release.txt
-        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
+        [ "$UPLOAD_COWTRANSFER" = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ "$UPLOAD_WETRANSFER" = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
