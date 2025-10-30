@@ -79,21 +79,13 @@ cp -a aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applica
 rm -rf aliyundrive-webdav
 
 # 拉取最后能编译的shadowsocks-rust
-wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
-unzip helloworld.zip
-rm -rf feeds/helloworld/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
-rm -rf feeds/PWpackages/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
-rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
-
-# 拉取最后能编译的dns2tcp
-# rm -rf feeds/helloworld/dns2tcp
-# rm -rf feeds/PWpackages/dns2tcp
-# git clone https://github.com/sbwml/openwrt_helloworld
-# cp -r openwrt_helloworld/dns2tcp feeds/helloworld
-# cp -r openwrt_helloworld/dns2tcp feeds/PWpackages
-# rm -rf openwrt_helloworld
+# wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
+# unzip helloworld.zip
+# rm -rf feeds/helloworld/shadowsocks-rust
+# cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
+# rm -rf feeds/PWpackages/shadowsocks-rust
+# cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
+# rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
