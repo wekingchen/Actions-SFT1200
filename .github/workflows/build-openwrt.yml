@@ -1,7 +1,10 @@
-# Copyright (c) 2019-2020 P3TERX
-# MIT License
-# https://github.com/P3TERX/Actions-OpenWrt
-# Description: Build OpenWrt using GitHub Actions
+# SPDX-License-Identifier: MIT
+# Build OpenWrt using GitHub Actions
+# - Host MUSL sysroot (/opt/musl) with real copy & strong checks
+# - Auto-detect target mipsel MUSL from staging_dir (absolute path)
+# - Preflight rust/host build (quick fail-fast + rich diagnostics)
+# - Print shadowsocks-rust Makefile dump.txt if exists (auto find)
+# - Use ONLY underscore env names (no dash in var names)
 
 name: Build OpenWrt
 
@@ -67,7 +70,7 @@ jobs:
 
     - name: Freeing up disk space
       uses: easimon/maximize-build-space@master
-      with: 
+      with:
         root-reserve-mb: 2048
         swap-size-mb: 1
         remove-dotnet: 'true'
@@ -101,12 +104,11 @@ jobs:
           echo "----[DIAG] date=$(date -Iseconds)"
           echo "----[DIAG] uname=$(uname -a)"
           echo "----[DIAG] TZ=$TZ"
-          echo "----[DIAG] MUSL_ROOT vars:"
-          env | grep -E '^MUSL_ROOT' || true
+          echo "----[DIAG] MUSL_ROOT vars (sorted):"
+          env | grep -E '^MUSL_ROOT' | sort || true
         }
         trap 'echo "----[TRAP] exit $? in ${BASH_SOURCE##*/}:${LINENO}"; trace_env || true' ERR
         EOS
-    # -------------------------------------------------------
 
     - name: Initialization environment
       env:
@@ -127,25 +129,22 @@ jobs:
         ldd --version || true
         trace_env
 
-    # ---------- Host 侧：构建 /opt/musl 绝对路径 ----------
-    - name: Prepare musl for Rust bootstrap (host fallback)
+    # ---------- Host 侧：/opt/musl 用“实拷贝”方式，强校验 ----------
+    - name: Prepare MUSL sysroot for Rust (host, fail-fast)
       run: |
         source /tmp/_diag.sh
         sudo apt-get update
-        sudo apt-get install -y musl-tools musl-dev
-        sudo mkdir -p /opt/musl
-        sudo ln -sfn /usr/include /opt/musl/include
-        LIBC_A=$(dpkg -L musl-dev | grep '/libc\.a$' | head -n1 || true)
-        if [ -z "$LIBC_A" ]; then
-          echo "musl-dev installed but libc.a not found"; exit 1
-        fi
-        sudo ln -sfn "$(dirname "$LIBC_A")" /opt/musl/lib
-        echo "MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
-        echo "RUST_MUSL_ROOT=/opt/musl" >> $GITHUB_ENV
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
-        echo "[HOST MUSL] libc.a at: $LIBC_A"
-        file "$LIBC_A" || true
-        ls -l "/opt/musl/lib" || true
+        sudo apt-get install -y musl-tools musl-dev rsync
+        sudo rm -rf /opt/musl
+        sudo mkdir -p /opt/musl/lib /opt/musl/include
+        sudo rsync -a /usr/lib/x86_64-linux-musl/ /opt/musl/lib/
+        sudo rsync -a /usr/include/ /opt/musl/include/
+        echo "MUSL_ROOT=/opt/musl"                                      >> $GITHUB_ENV
+        echo "RUST_MUSL_ROOT=/opt/musl"                                 >> $GITHUB_ENV
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"            >> $GITHUB_ENV
+        test -f /opt/musl/lib/libc.a || { echo "FATAL: /opt/musl/lib/libc.a missing"; ls -l /opt/musl/lib || true; exit 2; }
+        file /opt/musl/lib/libc.a || true
+        ls -al /opt/musl/lib | sed -n '1,120p'
         trace_env
     # ------------------------------------------------------
 
@@ -228,10 +227,10 @@ jobs:
             | grep 'target-mipsel' -m1 || true
           )
         fi
-        [ -n "${MIPS_LIBC:-}" ] || { echo "FATAL: cannot locate mipsel musl libc.a in $ROOT"; exit 3; }
+        [ -n "${MIPS_LIBC:-}" ] || { echo "FATAL: target mipsel musl libc.a not found in $ROOT"; exit 3; }
 
-        LIB_DIR="$(dirname "$MIPS_LIBC")"
-        MUSL_ROOT_CAND="$(dirname "$LIB_DIR")"
+        LIB_DIR="$(dirname "$MIPS_LIBC")"              # …/lib
+        MUSL_ROOT_CAND="$(dirname "$LIB_DIR")"         # …/（包含 lib/ 的上一级）
         MUSL_ROOT_ABS="$(readlink -f "$MUSL_ROOT_CAND")"
 
         echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
@@ -242,12 +241,9 @@ jobs:
         TEST="$MUSL_ROOT_ABS/lib/libc.a"
         [ -f "$TEST" ] || { echo "FATAL: expected $TEST"; exit 2; }
 
-        # 统一使用下划线变量名；两种 mipsel triple 均设置到同一位置
+        # 同步导出（覆盖 unknown / openwrt 两种 vendor）
         echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MUSL_ROOT_ABS" >> $GITHUB_ENV
         echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$MUSL_ROOT_ABS" >> $GITHUB_ENV
-
-        # Host 侧（供 rust/host 预编译）
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
 
         echo "----[DIAG] Exported MUSL_ROOT_* to \$GITHUB_ENV"
         trace_env
@@ -258,13 +254,15 @@ jobs:
         source /tmp/_diag.sh
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
 
-        # Fail-fast：变量必须为绝对路径
+        # Fail-fast：变量必须为绝对路径，且存在 libc.a
         : "${MUSL_ROOT_x86_64_unknown_linux_musl:=/opt/musl}"
         case "${MUSL_ROOT_x86_64_unknown_linux_musl}" in /*) ;; *) echo "FATAL: HOST MUSL_ROOT is NOT absolute: ${MUSL_ROOT_x86_64_unknown_linux_musl}"; exit 2;; esac
         test -f "${MUSL_ROOT_x86_64_unknown_linux_musl}/lib/libc.a"
 
         rustc --version || true
         cargo --version || true
+        realpath /opt/musl || true
+        ls -al /opt/musl/lib || true
 
         # 清理 + 预编译（把 host 侧 MUSL 根内联传入，确保 rust 能读到）
         MUSL_ROOT_x86_64_unknown_linux_musl="${MUSL_ROOT_x86_64_unknown_linux_musl}" \
@@ -276,6 +274,24 @@ jobs:
         make package/feeds/packages2/rust/host/compile V=sc
 
         echo "----[DIAG] Preflight rust/host passed."
+        trace_env
+
+    # ---------- 打印 shadowsocks-rust 的 Makefile dump（自动查找路径） ----------
+    - name: Show shadowsocks-rust Makefile dump (if present)
+      run: |
+        source /tmp/_diag.sh
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        echo ">>> Looking for shadowsocks-rust dump files under logs/feeds/ ..."
+        FOUND=0
+        while IFS= read -r f; do
+          FOUND=1
+          echo "----- [DUMP] $f (head) -----"
+          sed -n '1,240p' "$f" || true
+          echo "----- [DUMP END] $f -----"
+        done < <(find logs/feeds -type f -path '*/shadowsocks-rust/*/dump.txt' 2>/dev/null || true)
+        if [ "$FOUND" -eq 0 ]; then
+          echo "No shadowsocks-rust dump.txt found (feeds may be clean or path differs)."
+        fi
         trace_env
 
     - name: SSH connection to Actions
