@@ -70,7 +70,7 @@ jobs:
 
     - name: Freeing up disk space
       uses: easimon/maximize-build-space@master
-      with: 
+      with: 
         root-reserve-mb: 2048
         swap-size-mb: 1
         remove-dotnet: 'true'
