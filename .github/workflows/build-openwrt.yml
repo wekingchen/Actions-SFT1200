@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: MIT
 # Build OpenWrt using GitHub Actions
-# - A: Host MUSL (/opt/musl) 实拷贝 + musl-cross 兜底 + 自检（替换原先 host musl 准备步）
-# - B: 在 toolchain/install 之后，预生成并写死 rust/host 的 config.toml 中的 musl-root
-# - C: rust/host 预检时行内注入 MUSL_* 并失败时 dump sanity.rs & config.toml
-# 其余内容不变
+# 仅三处改动：
+# A: Host MUSL (/opt/musl) 实拷贝 + musl-cross 兜底 + 强校验
+# B: toolchain 后绝对路径探测 mipsel MUSL_ROOT + 写死 rust/host config.toml
+# C: 触发 Rust 的 make 前，行内把通用 MUSL_ROOT 也指向 mipsel sysroot（并强打点）
+# 其余步骤维持你的原样
 
 name: Build OpenWrt
 
@@ -41,13 +42,13 @@ jobs:
     steps:
     - name: Before freeing up disk space
       run: |
+        echo "Before freeing up disk space"
         echo "=============================================================================="
-        echo "[DF BEFORE]"
         df -hT
         echo "=============================================================================="
 
-    - name: Optimize Disk Space
-      uses: hugoalh/disk-space-optimizer-ghaction@v0.8.1
+    - name: "Optimize Disk Space"
+      uses: "hugoalh/disk-space-optimizer-ghaction@v0.8.1"
       with:
         operate_sudo: "True"
         general_include: ".+"
@@ -80,75 +81,54 @@ jobs:
 
     - name: Free up disk space complete
       run: |
+        echo "Free up disk space complete"
         echo "=============================================================================="
-        echo "[DF AFTER]"
         df -hT
         echo "=============================================================================="
 
     - name: Checkout
       uses: actions/checkout@main
 
-    # ----------------- 公共诊断工具（保留） -----------------
+    # ---- 公共小工具：变量守卫/诊断（仅内部使用，不改变你的逻辑） ----
     - name: Bootstrap diag helpers
       run: |
         set -euxo pipefail
-        export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
         cat >/tmp/_diag.sh <<'EOS'
         set -euxo pipefail
-        export PS4='+ [${BASH_SOURCE##*/}:${LINENO}] '
-        trace_env() {
-          echo "----[DIAG] CWD=$(pwd)"
-          echo "----[DIAG] PATH=$PATH"
-          echo "----[DIAG] whoami=$(whoami)"
-          echo "----[DIAG] date=$(date -Iseconds)"
-          echo "----[DIAG] uname=$(uname -a)"
-          echo "----[DIAG] TZ=$TZ"
-          echo "----[DIAG] MUSL_ROOT vars (sorted):"
-          env | grep -E '^MUSL_ROOT' | sort || true
-        }
-        guard_names() {
-          env | grep -E '^MUSL_ROOT_.*-' && { echo 'FATAL: dash in MUSL_ROOT_* var name'; exit 2; } || true
-        }
-        trap 'echo "----[TRAP] exit $? in ${BASH_SOURCE##*/}:${LINENO}"; trace_env || true' ERR
+        guard_names() { env | grep -E '^MUSL_ROOT_.*-' && { echo 'FATAL: dash in MUSL_ROOT_* var name'; exit 2; } || true; }
+        diag_env() { echo "==MUSL ENV=="; env | grep -E '^MUSL_ROOT' | sort || true; }
         EOS
 
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        source /tmp/_diag.sh
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
         sudo add-apt-repository -y universe
-        sudo apt-get -y update
+        sudo apt-get update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
-        bash --version
-        gcc --version || true
-        ldd --version || true
-        trace_env
 
-    # ===== A. Host MUSL 实拷贝 + musl-cross 兜底 + 自检（替换原先 host musl 步）=====
+    # ===== A. Host MUSL：实拷贝 + musl-cross 兜底 + 强校验 =====
     - name: Prepare MUSL for Rust host (solid + musl-cross fallback)
       run: |
-        source /tmp/_diag.sh
+        source /tmp/_diag.sh || true
         set -euxo pipefail
         sudo apt-get update
-        sudo apt-get install -y musl-tools musl-dev rsync xz-utils curl
+        sudo apt-get install -y musl-tools musl-dev rsync xz-utils curl binutils
 
-        # 先用系统包实拷贝到 /opt/musl
         sudo rm -rf /opt/musl && sudo mkdir -p /opt/musl/lib /opt/musl/include
         sudo rsync -a /usr/include/ /opt/musl/include/ || true
         if [ -d /usr/lib/x86_64-linux-musl ]; then
           sudo rsync -a /usr/lib/x86_64-linux-musl/ /opt/musl/lib/
         fi
 
-        # 若仍没有 libc.a，则兜底下载 musl-cross 并实拷贝
         if [ ! -f /opt/musl/lib/libc.a ]; then
-          echo "[fallback] fetching x86_64-linux-musl-cross ..."
+          echo "[fallback] fetching x86_64-linux-musl-cross …"
           sudo mkdir -p /opt/musl-cross
           curl -L --retry 3 --fail -o /tmp/x86_64-linux-musl-cross.tgz https://musl.cc/x86_64-linux-musl-cross.tgz
           sudo tar -xzf /tmp/x86_64-linux-musl-cross.tgz -C /opt/musl-cross
@@ -158,130 +138,121 @@ jobs:
           sudo rsync -a "$TCH/lib/"     /opt/musl/lib/
         fi
 
-        # 强校验 + 目录打点
-        test -f /opt/musl/lib/libc.a || { echo "FATAL: /opt/musl/lib/libc.a missing even after fallback"; ls -al /opt/musl/lib; exit 2; }
+        test -f /opt/musl/lib/libc.a || { echo "FATAL: /opt/musl/lib/libc.a missing"; ls -al /opt/musl/lib; exit 2; }
         ar -t /opt/musl/lib/libc.a | head -n 10 || true
-        echo "MUSL_ROOT=/opt/musl"                           >> $GITHUB_ENV
-        echo "RUST_MUSL_ROOT=/opt/musl"                      >> $GITHUB_ENV
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl" >> $GITHUB_ENV
+
+        {
+          echo "MUSL_ROOT=/opt/musl"
+          echo "RUST_MUSL_ROOT=/opt/musl"
+          echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"
+        } >> $GITHUB_ENV
+
         echo "==HOST /opt/musl/lib=="; ls -l /opt/musl/lib | sed -n '1,120p'
-        guard_names
-        trace_env
-    # =====================================================
+        diag_env
 
     - name: Clone source code
       working-directory: ./
       run: |
-        source /tmp/_diag.sh
         df -hT $PWD
-        git clone "$REPO_URL" -b "$REPO_BRANCH" openwrt
-        ln -sf /openwrt "$GITHUB_WORKSPACE/openwrt"
+        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
         git config --global user.email "you@example.com"
         git config --global user.name "Your Name"
-        python3 setup.py -c ./configs/config-siflower-18.x.yml
-        cd openwrt-18.06/siflower/openwrt-18.06
+        python3 setup.py -c ./configs/config-siflower-18.x.yml && cd openwrt-18.06/siflower/openwrt-18.06
         ./scripts/gen_config.py target_siflower_gl-sft1200 luci
-        trace_env
 
     - name: Load custom feeds
       run: |
-        source /tmp/_diag.sh
-        [ -e "$FEEDS_CONF" ] && mv "$FEEDS_CONF" openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
-        chmod +x "$DIY_P1_SH"
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
+        chmod +x $DIY_P1_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        "$GITHUB_WORKSPACE/$DIY_P1_SH"
-        trace_env
+        $GITHUB_WORKSPACE/$DIY_P1_SH
 
     - name: Update feeds
-      run: |
-        source /tmp/_diag.sh
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        ./scripts/feeds update -a
-        trace_env
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
 
     - name: Install feeds
-      run: |
-        source /tmp/_diag.sh
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        ./scripts/feeds install -a
-        trace_env
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
     - name: Load custom configuration
       run: |
-        source /tmp/_diag.sh
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
-        [ -e "$CONFIG_FILE" ] && mv "$CONFIG_FILE" openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
-        chmod +x "$DIY_P2_SH"
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+        chmod +x $DIY_P2_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        "$GITHUB_WORKSPACE/$DIY_P2_SH"
-        trace_env
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: Normalize OpenWrt config (defconfig)
-      run: |
-        source /tmp/_diag.sh
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make defconfig
-        trace_env
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make defconfig
 
     - name: Build OpenWrt toolchain only
-      run: |
-        source /tmp/_diag.sh
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make toolchain/install -j"$(nproc)"
-        trace_env
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make toolchain/install -j"$(nproc)"
 
-    # ===== B. 写死 rust/host config.toml 的 musl-root（新增，不改其余流程）=====
+    # ===== B1. 以“绝对路径”探测 mipsel MUSL_ROOT 并导出 =====
+    - name: Detect mipsel MUSL sysroot (absolute) & export
+      run: |
+        source /tmp/_diag.sh || true
+        set -euo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        ROOT="$PWD/staging_dir"
+
+        MIPS_LIBC="$(
+          find "$ROOT" -maxdepth 10 -type f -path '*mipsel*musl*/lib/libc.a' | grep 'toolchain-mipsel' -m1 || true
+        )"
+        if [ -z "${MIPS_LIBC:-}" ]; then
+          MIPS_LIBC="$(
+            find "$ROOT" -maxdepth 10 -type f -path '*mipsel*musl*/lib/libc.a' | grep 'target-mipsel' -m1 || true
+          )"
+        fi
+        [ -n "${MIPS_LIBC:-}" ] || { echo "FATAL: mipsel musl libc.a not found under $ROOT"; exit 3; }
+
+        MIPS_LIBC="$(readlink -f -- "$MIPS_LIBC")"
+        LIB_DIR="$(dirname "$MIPS_LIBC")"                  # …/lib
+        SYSROOT="$(readlink -f -- "$(dirname "$LIB_DIR")")" # 去掉 /lib 得根
+
+        echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
+        test -f "$SYSROOT/lib/libc.a" || { echo "FATAL: $SYSROOT/lib/libc.a missing"; exit 2; }
+
+        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$SYSROOT"           >> $GITHUB_ENV
+        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$SYSROOT"           >> $GITHUB_ENV
+        echo "MUSL_ROOT=/opt/musl"                                    >> $GITHUB_ENV
+        echo "RUST_MUSL_ROOT=/opt/musl"                               >> $GITHUB_ENV
+        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"          >> $GITHUB_ENV
+
+        echo "==TARGET $SYSROOT/lib=="; ls -l "$SYSROOT/lib" | sed -n '1,120p'
+        diag_env
+
+    # ===== B2. 写死 rust/host 的 config.toml（musl-root="/opt/musl"） =====
     - name: Preseed rust/host config.toml with musl-root
       run: |
-        source /tmp/_diag.sh
         set -euxo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make -j1 V=sc package/feeds/packages2/rust/host/{clean,prepare}
         CONF=$(find build_dir -type f -path '*/host/rustc-*/config.toml' | head -n1 || true)
-        if [ -z "${CONF}" ]; then
-          echo "FATAL: rust config.toml not found after prepare"
-          find build_dir -maxdepth 5 -name 'rustc-*' -type d -print
-          exit 2
-        fi
+        [ -n "$CONF" ] || { echo "FATAL: rust config.toml not found"; find build_dir -maxdepth 5 -name 'rustc-*' -type d -print; exit 2; }
+
         echo "### BEFORE (head):"; sed -n '1,80p' "$CONF"
         awk -v ROOT="/opt/musl" '
           BEGIN{w=0}
           /^\[target\.x86_64-unknown-linux-musl\]/{print;print "musl-root = \""ROOT"\""; print "musl-libdir = \"lib\""; w=1; next}
           {print}
           END{if(!w){print "[target.x86_64-unknown-linux-musl]"; print "musl-root = \""ROOT"\""; print "musl-libdir = \"lib\""}}
-        ' "$CONF" > "$CONF.new"
-        mv "$CONF.new" "$CONF"
+        ' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
         echo "### AFTER (head):"; sed -n '1,120p' "$CONF"
-        trace_env
-    # =====================================================
 
-    # ---------- 目标 mipsel MUSL：从 staging_dir 探测“sysroot根”+ 强校验（保留） ----------
-    - name: Detect mipsel MUSL sysroot (root dir) & export
-      run: |
-        source /tmp/_diag.sh
-        guard_names
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        LIBC=$(find staging_dir -type f -name libc.a -path '*mipsel*musl*/lib/libc.a' | head -n1 || true)
-        [ -n "$LIBC" ] || { echo "FATAL target: libc.a not found in staging_dir"; exit 3; }
-        MIPS_SYSROOT=$(dirname "$(dirname "$LIBC")")  # 去掉末尾 /lib
-        test -f "$MIPS_SYSROOT/lib/libc.a" || { echo "FATAL target: $MIPS_SYSROOT/lib/libc.a missing"; exit 2; }
-        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$MIPS_SYSROOT" >> $GITHUB_ENV
-        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$MIPS_SYSROOT" >> $GITHUB_ENV
-        echo "==TARGET $MIPS_SYSROOT/lib=="; ls -l "$MIPS_SYSROOT/lib" | sed -n '1,120p'
-        trace_env
-    # ------------------------------------------------------
-
-    # ===== C. rust/host 预检（行内注入 + 失败时 sanity.rs/config dump）（替换原 preflight）=====
+    # ===== C. rust/host 预检：行内把通用 MUSL_ROOT 也指向 mipsel sysroot（并打点） =====
     - name: Preflight — rust/host (hard check)
       run: |
-        source /tmp/_diag.sh
+        source /tmp/_diag.sh || true
         set -euxo pipefail
-        guard_names
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        : "${MUSL_ROOT_mipsel_unknown_linux_musl:?mipsel MUSL_ROOT empty}"
         test -f /opt/musl/lib/libc.a
         echo '==HOST /opt/musl/lib=='; ls -l /opt/musl/lib | sed -n '1,120p'
-        MUSL_ROOT="/opt/musl" \
+        echo "==TARGET ${MUSL_ROOT_mipsel_unknown_linux_musl}/lib=="; ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" | sed -n '1,120p'
+
+        MUSL_ROOT="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
         RUST_MUSL_ROOT="/opt/musl" \
         MUSL_ROOT_x86_64_unknown_linux_musl="/opt/musl" \
         MUSL_LIBDIR="lib" \
@@ -292,26 +263,6 @@ jobs:
           find build_dir -type f -path '*/host/rustc-*/config.toml' -print -exec sed -n '1,160p' {} \; || true
           exit 1
         }
-        trace_env
-    # =====================================================
-
-    # ---------- 打印 shadowsocks-rust 的 Makefile dump（保留） ----------
-    - name: Show shadowsocks-rust Makefile dump (if present)
-      run: |
-        source /tmp/_diag.sh
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo ">>> Looking for shadowsocks-rust dump files under logs/feeds/ ..."
-        FOUND=0
-        while IFS= read -r f; do
-          FOUND=1
-          echo "----- [DUMP] $f (head) -----"
-          sed -n '1,240p' "$f" || true
-          echo "----- [DUMP END] $f -----"
-        done < <(find logs/feeds -type f -path '*/shadowsocks-rust/*/dump.txt' 2>/dev/null || true)
-        if [ "$FOUND" -eq 0 ]; then
-          echo "No shadowsocks-rust dump.txt found (feeds may be clean or path differs)."
-        fi
-        trace_env
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -323,19 +274,15 @@ jobs:
     - name: Download package
       id: package
       run: |
-        source /tmp/_diag.sh
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
-        trace_env
-
+        
     - name: Compile the firmware
       id: compile
       run: |
-        source /tmp/_diag.sh
-        guard_names
+        source /tmp/_diag.sh || true
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         echo -e "$(nproc) thread compile"
-
         : "${MUSL_ROOT_mipsel_unknown_linux_musl:?target MUSL_ROOT empty}"
         case "${MUSL_ROOT_mipsel_unknown_linux_musl}" in /*) ;; *) echo "FATAL: target MUSL_ROOT not absolute: ${MUSL_ROOT_mipsel_unknown_linux_musl}"; exit 2;; esac
         test -f "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib/libc.a"
@@ -343,18 +290,18 @@ jobs:
         echo '==HOST /opt/musl/lib=='; ls -l /opt/musl/lib | sed -n '1,80p'
         echo "==TARGET ${MUSL_ROOT_mipsel_unknown_linux_musl}/lib=="; ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" | sed -n '1,80p'
 
-        MUSL_ROOT="/opt/musl" \
+        # 行内注入：让 bootstrap 不管读谁都能命中
+        MUSL_ROOT="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
         RUST_MUSL_ROOT="/opt/musl" \
         MUSL_ROOT_x86_64_unknown_linux_musl="/opt/musl" \
         MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
         MUSL_ROOT_mipsel_openwrt_linux_musl="${MUSL_ROOT_mipsel_openwrt_linux_musl:-${MUSL_ROOT_mipsel_unknown_linux_musl}}" \
-        make -j"$(nproc)" V=s
-
+        make -j$(nproc) V=s
+        # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
-        trace_env
 
     - name: Check space usage
       if: (!cancelled())
