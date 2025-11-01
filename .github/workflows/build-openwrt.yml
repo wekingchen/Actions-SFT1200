@@ -1,12 +1,12 @@
-# SPDX-License-Identifier: MIT
-# Build OpenWrt using GitHub Actions
-# 变更点：
-# A: Host MUSL (/opt/musl) 实拷贝 + musl-cross 兜底 + 强校验
-# B1: toolchain 后绝对路径探测 mipsel MUSL_ROOT 并导出
-# B2: 写死 rust/host config.toml（musl-root="/opt/musl"）
-# C: 触发 Rust 的 make 前，行内把通用 MUSL_ROOT 也指向 mipsel sysroot（并强打点）
-# D: feeds 阶段 Normalize 行尾（去 CRLF）+ dump 解析错误（fail-fast）
-# 其余步骤保持你的原样；可选 Makefile 覆盖通过环境变量开关
+#
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+#
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# Description: Build OpenWrt using GitHub Actions
+#
 
 name: Build OpenWrt
 
@@ -33,14 +33,10 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
-  APPLY_SSRUST_MK: "false"   # 可选：设为 "true" 时覆盖 shadowsocks-rust Makefile（18.06 兼容版）
 
 jobs:
   build:
     runs-on: ubuntu-22.04
-    defaults:
-      run:
-        shell: bash -euo pipefail {0}
 
     steps:
     - name: Before freeing up disk space
@@ -50,8 +46,8 @@ jobs:
         df -hT
         echo "=============================================================================="
 
-    - name: Optimize Disk Space
-      uses: hugoalh/disk-space-optimizer-ghaction@v0.8.1
+    - name: "Optimize Disk Space"
+      uses: "hugoalh/disk-space-optimizer-ghaction@v0.8.1"
       with:
         operate_sudo: "True"
         general_include: ".+"
@@ -92,66 +88,19 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    # ---- 小工具：变量守卫/诊断（内部使用，不改变你的逻辑） ----
-    - name: Bootstrap diag helpers
-      run: |
-        set -euxo pipefail
-        cat >/tmp/_diag.sh <<'EOS'
-        set -euxo pipefail
-        guard_names() { env | grep -E '^MUSL_ROOT_.*-' && { echo 'FATAL: dash in MUSL_ROOT_* var name'; exit 2; } || true; }
-        diag_env()    { echo "==MUSL ENV=="; env | grep -E '^MUSL_ROOT' | sort || true; }
-        EOS
-
     - name: Initialization environment
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
-        sudo add-apt-repository -y universe
+        sudo add-apt-repository universe
         sudo apt-get update
         sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
         sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
-
-    # ===== A. Host MUSL：实拷贝 + musl-cross 兜底 + 强校验 =====
-    - name: Prepare MUSL for Rust host (solid + musl-cross fallback)
-      run: |
-        source /tmp/_diag.sh || true
-        set -euxo pipefail
-        sudo apt-get update
-        sudo apt-get install -y musl-tools musl-dev rsync xz-utils curl binutils
-
-        sudo rm -rf /opt/musl && sudo mkdir -p /opt/musl/lib /opt/musl/include
-        sudo rsync -a /usr/include/ /opt/musl/include/ || true
-        if [ -d /usr/lib/x86_64-linux-musl ]; then
-          sudo rsync -a /usr/lib/x86_64-linux-musl/ /opt/musl/lib/
-        fi
-
-        if [ ! -f /opt/musl/lib/libc.a ]; then
-          echo "[fallback] fetching x86_64-linux-musl-cross …"
-          sudo mkdir -p /opt/musl-cross
-          curl -L --retry 3 --fail -o /tmp/x86_64-linux-musl-cross.tgz https://musl.cc/x86_64-linux-musl-cross.tgz
-          sudo tar -xzf /tmp/x86_64-linux-musl-cross.tgz -C /opt/musl-cross
-          TCH=/opt/musl-cross/x86_64-linux-musl-cross/x86_64-linux-musl
-          test -f "$TCH/lib/libc.a"
-          sudo rsync -a "$TCH/include/" /opt/musl/include/
-          sudo rsync -a "$TCH/lib/"     /opt/musl/lib/
-        fi
-
-        test -f /opt/musl/lib/libc.a || { echo "FATAL: /opt/musl/lib/libc.a missing"; ls -al /opt/musl/lib; exit 2; }
-        ar -t /opt/musl/lib/libc.a | head -n 10 || true
-
-        {
-          echo "MUSL_ROOT=/opt/musl"
-          echo "RUST_MUSL_ROOT=/opt/musl"
-          echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"
-        } >> $GITHUB_ENV
-
-        echo "==HOST /opt/musl/lib=="; ls -l /opt/musl/lib | sed -n '1,120p'
-        diag_env
 
     - name: Clone source code
       working-directory: ./
@@ -175,196 +124,20 @@ jobs:
     - name: Update feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
 
-    # ===== D1. Normalize 行尾（去 CRLF，避免 feeds 解析器炸） =====
-    - name: Normalize line endings for feeds (LF only)
-      run: |
-        set -eux
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        git ls-files -- "*.mk" "Makefile" "Kconfig" "*.patch" | while read -r p; do
-          if grep -Iq $'\r' "$p"; then
-            sed -i 's/\r$//' "$p"
-          fi
-        done
-
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    # ===== D2. 如果 feeds 解析失败，把 dump.txt 打到控制台并立刻失败（fail-fast） =====
-    - name: Show feed parser dump if exists (fail-fast)
+    - name: Load custom configuration
       run: |
-        set -e
+        [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
+        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+        chmod +x $DIY_P2_SH
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        has=0
-        for f in \
-          logs/feeds/**/shadowsocks-rust/dump.txt \
-          logs/feeds/**/dns2socks-rust/dump.txt \
-          logs/feeds/**/shadow-tls/dump.txt \
-          logs/feeds/**/tuic-client/dump.txt \
-          logs/feeds/**/dump.txt
-        do
-          if [ -f "$f" ]; then
-            has=1
-            echo "=================== $f ==================="
-            sed -n '1,300p' "$f"
-            echo "================ end of $f ==============="
-          fi
-        done
-        if [ "$has" = 1 ]; then
-          exit 66
-        fi
-
-    # （可选）写入一份 18.06 兼容的 shadowsocks-rust Makefile（默认不启用）
-    - name: OPTIONAL — apply 18.06-compatible shadowsocks-rust Makefile
-      if: ${{ env.APPLY_SSRUST_MK == 'true' }}
-      run: |
-        set -eux
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        # 按你的 feeds 实际路径调整，示例优先 PWpackages，其次 helloworld
-        TARGET_DIR=""
-        for d in feeds/PWpackages/shadowsocks-rust feeds/helloworld/shadowsocks-rust; do
-          if [ -d "$d" ]; then TARGET_DIR="$d"; break; fi
-        done
-        [ -n "$TARGET_DIR" ] || { echo "no shadowsocks-rust feed dir found"; exit 0; }
-        cat > "$TARGET_DIR/Makefile" <<'SSRMK'
-# SPDX-License-Identifier: MIT
-include $(TOPDIR)/rules.mk
-
-PKG_NAME:=shadowsocks-rust
-PKG_VERSION:=1.23.5
-PKG_RELEASE:=1
-
-PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
-PKG_SOURCE_URL:=https://codeload.github.com/shadowsocks/shadowsocks-rust/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=edeef2408ae54108fa176b4e59cb04b4ef4dbe62da96d2459d9821b238ad94e8
-
-PKG_LICENSE:=MIT
-PKG_LICENSE_FILES:=LICENSE
-PKG_MAINTAINER:=Tianling Shen <cnsztl@immortalwrt.org>
-
-PKG_BUILD_DEPENDS:=rust/host
-PKG_BUILD_PARALLEL:=1
-
-RUST_PKG_FEATURES:=local-redir
-
-include $(INCLUDE_DIR)/package.mk
-include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk
-
-SHADOWSOCKS_COMPONENTS:=sslocal ssmanager ssserver ssurl ssservice
-
-define Package/shadowsocks-rust/template
-  define Package/shadowsocks-rust-$(1)
-    SECTION:=net
-    CATEGORY:=Network
-    SUBMENU:=Web Servers/Proxies
-    TITLE:=shadowsocks-rust ($(1))
-    URL:=https://github.com/shadowsocks/shadowsocks-rust
-    DEPENDS:=$$(RUST_ARCH_DEPENDS)
-  endef
-
-  define Package/shadowsocks-rust-$(1)/install
-	$$(INSTALL_DIR) $$(1)/usr/bin
-	$$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/$(1) $$(1)/usr/bin/
-  endef
-endef
-
-$(foreach c,$(SHADOWSOCKS_COMPONENTS), \
-  $(eval $(call Package/shadowsocks-rust/template,$(c))) \
-)
-
-define Build/Compile
-	$(call RustPackage/Compile/Default)
-endef
-
-$(foreach c,$(SHADOWSOCKS_COMPONENTS), \
-  $(eval $(call BuildPackage,shadowsocks-rust-$(c))) \
-)
-SSRMK
-        echo "[applied] $TARGET_DIR/Makefile"; sed -n '1,120p' "$TARGET_DIR/Makefile"
-
-    - name: Normalize OpenWrt config (defconfig)
-      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make defconfig
-
-    - name: Build OpenWrt toolchain only
-      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make toolchain/install -j"$(nproc)"
-
-    # ===== B1. 绝对路径探测 mipsel MUSL_ROOT 并导出 =====
-    - name: Detect mipsel MUSL sysroot (absolute) & export
-      run: |
-        source /tmp/_diag.sh || true
-        set -euo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        ROOT="$PWD/staging_dir"
-
-        MIPS_LIBC="$(
-          find "$ROOT" -maxdepth 10 -type f -path '*mipsel*musl*/lib/libc.a' | grep 'toolchain-mipsel' -m1 || true
-        )"
-        if [ -z "${MIPS_LIBC:-}" ]; then
-          MIPS_LIBC="$(
-            find "$ROOT" -maxdepth 10 -type f -path '*mipsel*musl*/lib/libc.a' | grep 'target-mipsel' -m1 || true
-          )"
-        fi
-        [ -n "${MIPS_LIBC:-}" ] || { echo "FATAL: mipsel musl libc.a not found under $ROOT"; exit 3; }
-
-        MIPS_LIBC="$(readlink -f -- "$MIPS_LIBC")"
-        LIB_DIR="$(dirname "$MIPS_LIBC")"                  # …/lib
-        SYSROOT="$(readlink -f -- "$(dirname "$LIB_DIR")")" # 去掉 /lib 得根
-
-        echo "DETECTED_MIPS_LIBC=$MIPS_LIBC"
-        test -f "$SYSROOT/lib/libc.a" || { echo "FATAL: $SYSROOT/lib/libc.a missing"; exit 2; }
-
-        echo "MUSL_ROOT_mipsel_unknown_linux_musl=$SYSROOT"           >> $GITHUB_ENV
-        echo "MUSL_ROOT_mipsel_openwrt_linux_musl=$SYSROOT"           >> $GITHUB_ENV
-        echo "MUSL_ROOT=/opt/musl"                                    >> $GITHUB_ENV
-        echo "RUST_MUSL_ROOT=/opt/musl"                               >> $GITHUB_ENV
-        echo "MUSL_ROOT_x86_64_unknown_linux_musl=/opt/musl"          >> $GITHUB_ENV
-
-        echo "==TARGET $SYSROOT/lib=="; ls -l "$SYSROOT/lib" | sed -n '1,120p'
-        diag_env
-
-    # ===== B2. 写死 rust/host 的 config.toml（musl-root="/opt/musl"） =====
-    - name: Preseed rust/host config.toml with musl-root
-      run: |
-        set -euxo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        make -j1 V=sc package/feeds/packages2/rust/host/{clean,prepare}
-        CONF=$(find build_dir -type f -path '*/host/rustc-*/config.toml' | head -n1 || true)
-        [ -n "$CONF" ] || { echo "FATAL: rust config.toml not found"; find build_dir -maxdepth 5 -name 'rustc-*' -type d -print; exit 2; }
-
-        echo "### BEFORE (head):"; sed -n '1,80p' "$CONF"
-        awk -v ROOT="/opt/musl" '
-          BEGIN{w=0}
-          /^\[target\.x86_64-unknown-linux-musl\]/{print;print "musl-root = \""ROOT"\""; print "musl-libdir = \"lib\""; w=1; next}
-          {print}
-          END{if(!w){print "[target.x86_64-unknown-linux-musl]"; print "musl-root = \""ROOT"\""; print "musl-libdir = \"lib\""}}
-        ' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
-        echo "### AFTER (head):"; sed -n '1,120p' "$CONF"
-
-    # ===== C. rust/host 预检：行内把通用 MUSL_ROOT 也指向 mipsel sysroot =====
-    - name: Preflight — rust/host (hard check)
-      run: |
-        source /tmp/_diag.sh || true
-        set -euxo pipefail
-        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        : "${MUSL_ROOT_mipsel_unknown_linux_musl:?mipsel MUSL_ROOT empty}"
-        test -f /opt/musl/lib/libc.a
-        echo '==HOST /opt/musl/lib=='; ls -l /opt/musl/lib | sed -n '1,120p'
-        echo "==TARGET ${MUSL_ROOT_mipsel_unknown_linux_musl}/lib=="; ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" | sed -n '1,120p'
-
-        MUSL_ROOT="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
-        RUST_MUSL_ROOT="/opt/musl" \
-        MUSL_ROOT_x86_64_unknown_linux_musl="/opt/musl" \
-        MUSL_LIBDIR="lib" \
-        make -j1 V=sc package/feeds/packages2/rust/host/compile || {
-          echo "==== rust sanity.rs context ===="
-          find build_dir -type f -path '*/host/rustc-*/src/bootstrap/src/core/sanity.rs' -print -exec sed -n '300,420p' {} \; || true
-          echo "==== rust config.toml (head) ===="
-          find build_dir -type f -path '*/host/rustc-*/config.toml' -print -exec sed -n '1,160p' {} \; || true
-          exit 1
-        }
+        $GITHUB_WORKSPACE/$DIY_P2_SH
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
-      if: ${{ (github.event.inputs.ssh == 'true' && github.event.inputs.ssh != 'false') || contains(github.event.action, 'ssh') }}
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
       env:
         TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
@@ -374,26 +147,12 @@ SSRMK
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
-
+        
     - name: Compile the firmware
       id: compile
       run: |
-        source /tmp/_diag.sh || true
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"
-        : "${MUSL_ROOT_mipsel_unknown_linux_musl:?target MUSL_ROOT empty}"
-        case "${MUSL_ROOT_mipsel_unknown_linux_musl}" in /*) ;; *) echo "FATAL: target MUSL_ROOT not absolute: ${MUSL_ROOT_mipsel_unknown_linux_musl}"; exit 2;; esac
-        test -f "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib/libc.a"
-
-        echo '==HOST /opt/musl/lib=='; ls -l /opt/musl/lib | sed -n '1,80p'
-        echo "==TARGET ${MUSL_ROOT_mipsel_unknown_linux_musl}/lib=="; ls -l "${MUSL_ROOT_mipsel_unknown_linux_musl}/lib" | sed -n '1,80p'
-
-        # 行内注入：让 bootstrap 不管读谁都能命中
-        MUSL_ROOT="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
-        RUST_MUSL_ROOT="/opt/musl" \
-        MUSL_ROOT_x86_64_unknown_linux_musl="/opt/musl" \
-        MUSL_ROOT_mipsel_unknown_linux_musl="${MUSL_ROOT_mipsel_unknown_linux_musl}" \
-        MUSL_ROOT_mipsel_openwrt_linux_musl="${MUSL_ROOT_mipsel_openwrt_linux_musl:-${MUSL_ROOT_mipsel_unknown_linux_musl}}" \
+        echo -e "$(nproc) thread compile"    
         make -j$(nproc) V=s
         # make -j1 V=s
         echo "status=success" >> $GITHUB_OUTPUT
@@ -402,19 +161,19 @@ SSRMK
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Check space usage
-      if: ${{ !cancelled() }}
+      if: (!cancelled())
       run: df -hT
 
     - name: Upload bin directory
       uses: actions/upload-artifact@main
-      if: ${{ steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true' }}
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/openwrt-18.06/siflower/openwrt-18.06/bin
 
     - name: Organize files
       id: organize
-      if: ${{ env.UPLOAD_FIRMWARE == 'true' && !cancelled() }}
+      if: env.UPLOAD_FIRMWARE == 'true' && !cancelled()
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/*/*
         rm -rf packages
@@ -423,14 +182,14 @@ SSRMK
 
     - name: Upload firmware directory
       uses: actions/upload-artifact@main
-      if: ${{ steps.organize.outputs.status == 'success' && !cancelled() }}
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: ${{ env.FIRMWARE }}
 
     - name: Upload firmware to cowtransfer
       id: cowtransfer
-      if: ${{ steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled() }}
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
@@ -439,7 +198,7 @@ SSRMK
 
     - name: Upload firmware to WeTransfer
       id: wetransfer
-      if: ${{ steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled() }}
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
       run: |
         curl -fsSL git.io/file-transfer | sh
         ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
@@ -448,7 +207,7 @@ SSRMK
 
     - name: Generate release tag
       id: tag
-      if: ${{ env.UPLOAD_RELEASE == 'true' && !cancelled() }}
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
@@ -458,7 +217,7 @@ SSRMK
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v1
-      if: ${{ steps.tag.outputs.status == 'success' && !cancelled() }}
+      if: steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -474,7 +233,7 @@ SSRMK
 
     - name: Remove old Releases
       uses: dev-drprasad/delete-older-releases@v0.3.3
-      if: ${{ env.UPLOAD_RELEASE == 'true' && !cancelled() }}
+      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
       with:
         keep_latest: 10
         delete_tags: true
