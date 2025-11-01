@@ -1,10 +1,12 @@
 # SPDX-License-Identifier: MIT
 # Build OpenWrt using GitHub Actions
-# 仅三处改动：
+# 变更点：
 # A: Host MUSL (/opt/musl) 实拷贝 + musl-cross 兜底 + 强校验
-# B: toolchain 后绝对路径探测 mipsel MUSL_ROOT + 写死 rust/host config.toml
+# B1: toolchain 后绝对路径探测 mipsel MUSL_ROOT 并导出
+# B2: 写死 rust/host config.toml（musl-root="/opt/musl"）
 # C: 触发 Rust 的 make 前，行内把通用 MUSL_ROOT 也指向 mipsel sysroot（并强打点）
-# 其余步骤维持你的原样
+# D: feeds 阶段 Normalize 行尾（去 CRLF）+ dump 解析错误（fail-fast）
+# 其余步骤保持你的原样；可选 Makefile 覆盖通过环境变量开关
 
 name: Build OpenWrt
 
@@ -31,6 +33,7 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  APPLY_SSRUST_MK: "false"   # 可选：设为 "true" 时覆盖 shadowsocks-rust Makefile（18.06 兼容版）
 
 jobs:
   build:
@@ -89,14 +92,14 @@ jobs:
     - name: Checkout
       uses: actions/checkout@main
 
-    # ---- 公共小工具：变量守卫/诊断（仅内部使用，不改变你的逻辑） ----
+    # ---- 小工具：变量守卫/诊断（内部使用，不改变你的逻辑） ----
     - name: Bootstrap diag helpers
       run: |
         set -euxo pipefail
         cat >/tmp/_diag.sh <<'EOS'
         set -euxo pipefail
         guard_names() { env | grep -E '^MUSL_ROOT_.*-' && { echo 'FATAL: dash in MUSL_ROOT_* var name'; exit 2; } || true; }
-        diag_env() { echo "==MUSL ENV=="; env | grep -E '^MUSL_ROOT' | sort || true; }
+        diag_env()    { echo "==MUSL ENV=="; env | grep -E '^MUSL_ROOT' | sort || true; }
         EOS
 
     - name: Initialization environment
@@ -172,16 +175,111 @@ jobs:
     - name: Update feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
 
+    # ===== D1. Normalize 行尾（去 CRLF，避免 feeds 解析器炸） =====
+    - name: Normalize line endings for feeds (LF only)
+      run: |
+        set -eux
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        git ls-files -- "*.mk" "Makefile" "Kconfig" "*.patch" | while read -r p; do
+          if grep -Iq $'\r' "$p"; then
+            sed -i 's/\r$//' "$p"
+          fi
+        done
+
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
-    - name: Load custom configuration
+    # ===== D2. 如果 feeds 解析失败，把 dump.txt 打到控制台并立刻失败（fail-fast） =====
+    - name: Show feed parser dump if exists (fail-fast)
       run: |
-        [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
-        chmod +x $DIY_P2_SH
+        set -e
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+        has=0
+        for f in \
+          logs/feeds/**/shadowsocks-rust/dump.txt \
+          logs/feeds/**/dns2socks-rust/dump.txt \
+          logs/feeds/**/shadow-tls/dump.txt \
+          logs/feeds/**/tuic-client/dump.txt \
+          logs/feeds/**/dump.txt
+        do
+          if [ -f "$f" ]; then
+            has=1
+            echo "=================== $f ==================="
+            sed -n '1,300p' "$f"
+            echo "================ end of $f ==============="
+          fi
+        done
+        if [ "$has" = 1 ]; then
+          exit 66
+        fi
+
+    # （可选）写入一份 18.06 兼容的 shadowsocks-rust Makefile（默认不启用）
+    - name: OPTIONAL — apply 18.06-compatible shadowsocks-rust Makefile
+      if: env.APPLY_SSRUST_MK == 'true'
+      run: |
+        set -eux
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        # 按你的 feeds 实际路径调整，示例优先 PWpackages，其次 helloworld
+        TARGET_DIR=""
+        for d in feeds/PWpackages/shadowsocks-rust feeds/helloworld/shadowsocks-rust; do
+          if [ -d "$d" ]; then TARGET_DIR="$d"; break; fi
+        done
+        [ -n "$TARGET_DIR" ] || { echo "no shadowsocks-rust feed dir found"; exit 0; }
+        cat > "$TARGET_DIR/Makefile" <<'SSRMK'
+# SPDX-License-Identifier: MIT
+include $(TOPDIR)/rules.mk
+
+PKG_NAME:=shadowsocks-rust
+PKG_VERSION:=1.23.5
+PKG_RELEASE:=1
+
+PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
+PKG_SOURCE_URL:=https://codeload.github.com/shadowsocks/shadowsocks-rust/tar.gz/v$(PKG_VERSION)?
+PKG_HASH:=edeef2408ae54108fa176b4e59cb04b4ef4dbe62da96d2459d9821b238ad94e8
+
+PKG_LICENSE:=MIT
+PKG_LICENSE_FILES:=LICENSE
+PKG_MAINTAINER:=Tianling Shen <cnsztl@immortalwrt.org>
+
+PKG_BUILD_DEPENDS:=rust/host
+PKG_BUILD_PARALLEL:=1
+
+RUST_PKG_FEATURES:=local-redir
+
+include $(INCLUDE_DIR)/package.mk
+include $(TOPDIR)/feeds/packages/lang/rust/rust-package.mk
+
+SHADOWSOCKS_COMPONENTS:=sslocal ssmanager ssserver ssurl ssservice
+
+define Package/shadowsocks-rust/template
+  define Package/shadowsocks-rust-$(1)
+    SECTION:=net
+    CATEGORY:=Network
+    SUBMENU:=Web Servers/Proxies
+    TITLE:=shadowsocks-rust ($(1))
+    URL:=https://github.com/shadowsocks/shadowsocks-rust
+    DEPENDS:=$$(RUST_ARCH_DEPENDS)
+  endef
+
+  define Package/shadowsocks-rust-$(1)/install
+	$$(INSTALL_DIR) $$(1)/usr/bin
+	$$(INSTALL_BIN) $$(PKG_INSTALL_DIR)/bin/$(1) $$(1)/usr/bin/
+  endef
+endef
+
+$(foreach c,$(SHADOWSOCKS_COMPONENTS), \
+  $(eval $(call Package/shadowsocks-rust/template,$(c))) \
+)
+
+define Build/Compile
+	$(call RustPackage/Compile/Default)
+endef
+
+$(foreach c,$(SHADOWSOCKS_COMPONENTS), \
+  $(eval $(call BuildPackage,shadowsocks-rust-$(c))) \
+)
+SSRMK
+        echo "[applied] $TARGET_DIR/Makefile"; sed -n '1,120p' "$TARGET_DIR/Makefile"
 
     - name: Normalize OpenWrt config (defconfig)
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make defconfig
@@ -189,7 +287,7 @@ jobs:
     - name: Build OpenWrt toolchain only
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && make toolchain/install -j"$(nproc)"
 
-    # ===== B1. 以“绝对路径”探测 mipsel MUSL_ROOT 并导出 =====
+    # ===== B1. 绝对路径探测 mipsel MUSL_ROOT 并导出 =====
     - name: Detect mipsel MUSL sysroot (absolute) & export
       run: |
         source /tmp/_diag.sh || true
@@ -241,7 +339,7 @@ jobs:
         ' "$CONF" > "$CONF.new" && mv "$CONF.new" "$CONF"
         echo "### AFTER (head):"; sed -n '1,120p' "$CONF"
 
-    # ===== C. rust/host 预检：行内把通用 MUSL_ROOT 也指向 mipsel sysroot（并打点） =====
+    # ===== C. rust/host 预检：行内把通用 MUSL_ROOT 也指向 mipsel sysroot =====
     - name: Preflight — rust/host (hard check)
       run: |
         source /tmp/_diag.sh || true
