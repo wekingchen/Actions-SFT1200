@@ -35,6 +35,9 @@ sed -i '/^+case SS_3_AUTHED:/,/^\+.*return ret;$/ {
     /^\+.*return ret;$/a\+}
 }' feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
 
+sed -n '/SS_3_AUTHED/,+20p' \
+feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
+
 # 修改naiveproxy编译源码以支持mips_siflower
 # 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
 sed -i '/else ifeq (\$(ARCH_PREBUILT),mips_siflower)/,+1 d' \
