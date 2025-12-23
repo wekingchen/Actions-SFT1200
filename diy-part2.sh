@@ -29,11 +29,11 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 修改microsocks源码以便编译成功
-sed -i 's/^+case SS_3_AUTHED:$/+case SS_3_AUTHED: {/' \
-    feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch && \
-sed -i '/^+case SS_3_AUTHED:/,/^\+.*return ret;$/ {
-    /^\+.*return ret;$/a\+}
-}' feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
+sed -i 's/^\([[:space:]]*case SS_3_AUTHED:\)$/\1 {/' \
+feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
+sed -i '/return ret;/a\
+            }' \
+feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
 
 sed -n '/SS_3_AUTHED/,+20p' \
 feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
