@@ -29,10 +29,17 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 修改microsocks源码以保证编译成功
-sed -i \
-  -e 's/^\(\+[[:space:]]*case[[:space:]]\+SS_3_AUTHED:\)$/\1 {/' \
-  -e '/^\+[[:space:]]*case[[:space:]]\+SS_3_AUTHED:/,/^\+[[:space:]]*case[[:space:]]\+SS_/ s/^\(\+[[:space:]]*return[[:space:]]\+ret;\)$/\1\n+            }/' \
-  feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch
+patch_file='feeds/packages2/net/microsocks/patches/100-Add-SOCKS5-forwarding-rules-support.patch'
+
+# 1) 把 "case SS_3_AUTHED:" 改成 "case SS_3_AUTHED: {"
+sed -i '/^\+.*case[[:space:]]\+SS_3_AUTHED:[[:space:]]*$/ s/:[[:space:]]*$/:\ {/' "$patch_file"
+
+# 2) 仅在 SS_3_AUTHED 这一段内，把 "return ret;" 后插入 "}"
+#    这里用一个范围：从该 case 行开始，到首次出现 "return ret;" 那行结束
+sed -i '/^\+.*case[[:space:]]\+SS_3_AUTHED:/,/^\+.*return[[:space:]]\+ret;[[:space:]]*$/{
+  /^\+.*return[[:space:]]\+ret;[[:space:]]*$/a\
++            }
+}' "$patch_file"
 
 # 修改naiveproxy编译源码以支持mips_siflower
 # 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
