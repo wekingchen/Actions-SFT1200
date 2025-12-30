@@ -29,11 +29,11 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # 回滚microsocks源码到能最后编译成功的版本
-wget https://github.com/xiaorouji/openwrt-passwall-packages/archive/9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip
-unzip 9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip
-rm -rf feeds/packages2/net/microsocks
-cp -r openwrt-passwall-packages-9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec/microsocks feeds/packages2/net
-rm -rf 9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip openwrt-passwall-packages-9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec
+#wget https://github.com/xiaorouji/openwrt-passwall-packages/archive/9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip
+#unzip 9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip
+#rm -rf feeds/packages2/net/microsocks
+#cp -r openwrt-passwall-packages-9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec/microsocks feeds/packages2/net
+#rm -rf 9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec.zip openwrt-passwall-packages-9feb8ca7dbc14f281fdbc7f8044839f6c2bf56ec
 
 # 修改naiveproxy编译源码以支持mips_siflower
 # 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
