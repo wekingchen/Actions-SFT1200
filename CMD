@@ -47,7 +47,7 @@ else ifeq ($(ARCH_PREBUILT),mips_siflower)\
   ARCH_PREBUILT:=mipsel_24kc-static' \
 feeds/PWpackages/naiveproxy/Makefile
 sed -i '/^else ifeq (\$(ARCH_PREBUILT),x86_64)/,/^endif/ c\
-else ifeq ($(ARCH_PREBUILT),x86_64)\n  PKG_HASH:=d6c39befccb1f3ad54ffa11c5ae8ad11a90151998eeaae6b1a73cc0702f24966\nelse ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=468990d9b4f6c683ad848ebc0f963dfbd46596d84904516c92a546e72fbf38bb\nelse\n  PKG_HASH:=dummy\nendif' \
+else ifeq ($(ARCH_PREBUILT),x86_64)\n  PKG_HASH:=5681e13c833757cfb5769755fd93d1906c47448af190585067bde9de590bdb2e\nelse ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=0ca95c162104c327f3f34be3f291445b098c44c5e7763206c13730e7974d7a34\nelse\n  PKG_HASH:=dummy\nendif' \
 feeds/PWpackages/naiveproxy/Makefile
 sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
 feeds/PWpackages/naiveproxy/Makefile
@@ -77,14 +77,6 @@ git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git aliyundri
 cp -a aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
 cp -a aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
 rm -rf aliyundrive-webdav
-
-wget https://codeload.github.com/fw876/helloworld/zip/28504024db649b7542347771704abc33c3b1ddc8 -O helloworld.zip
-unzip helloworld.zip
-rm -rf feeds/helloworld/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/helloworld
-rm -rf feeds/PWpackages/shadowsocks-rust
-cp -r helloworld-28504024db649b7542347771704abc33c3b1ddc8/shadowsocks-rust feeds/PWpackages
-rm -rf helloworld.zip helloworld-28504024db649b7542347771704abc33c3b1ddc8
 
 git clone https://github.com/coolsnowwolf/lede.git
 cp -r lede/tools/ninja tools
