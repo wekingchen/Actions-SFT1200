@@ -20,8 +20,8 @@ sed -i "/helloworld/d" "feeds.conf.default"
 echo "src-git gl https://github.com/gl-inet/gl-feeds.git;18.06" >> "feeds.conf.default"
 echo "src-git luci2 https://github.com/coolsnowwolf/luci" >> "feeds.conf.default"
 echo "src-git packages2 https://github.com/coolsnowwolf/packages" >> "feeds.conf.default"
-echo "src-git PWpackages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> "feeds.conf.default"
-echo "src-git PWluci https://github.com/xiaorouji/openwrt-passwall.git;main" >> "feeds.conf.default"
+echo "src-git PWpackages https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git;main" >> "feeds.conf.default"
+echo "src-git PWluci https://github.com/Openwrt-Passwall/openwrt-passwall.git;main" >> "feeds.conf.default"
 echo "src-git helloworld https://github.com/fw876/helloworld.git;master" >> "feeds.conf.default"
 
 ./scripts/feeds clean
