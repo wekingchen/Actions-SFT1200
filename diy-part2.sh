@@ -67,7 +67,7 @@ sed -i -E \
 
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/gl_feed_common/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 # 增加阿里云盘WebDAV 及其 LuCI
