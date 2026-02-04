@@ -20,7 +20,6 @@ on:
         default: 'false'
 
 env:
-  # REPO_URL: https://github.com/gl-inet/gl-infra-builder
   REPO_URL: https://github.com/201821143044/gl-infra-builder-new
   REPO_BRANCH: main
   FEEDS_CONF: feeds.conf.default
@@ -66,17 +65,6 @@ jobs:
         npm_prune: "True"
         npm_clean: "True"
         os_swap: "True"
-
-    - name: Freeing up disk space
-      uses: easimon/maximize-build-space@master
-      with: 
-        root-reserve-mb: 2048
-        swap-size-mb: 1
-        remove-dotnet: 'true'
-        remove-android: 'true'
-        remove-haskell: 'true'
-        remove-codeql: 'true'
-        remove-docker-images: 'true'
 
     - name: Free up disk space complete
       run: |
