@@ -66,7 +66,7 @@ sed -i -E \
   feeds/gl_feed_1806/haproxy/Makefile
 
 # haproxy去掉QUIC支持
-sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' package/feeds/gl_feed_1806/haproxy/Makefile
+sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' feeds/gl_feed_1806/haproxy/Makefile
 
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/gl_feed_common/golang
