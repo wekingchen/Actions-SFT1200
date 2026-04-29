@@ -28,6 +28,13 @@ cp -r feeds/helloworld/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
+# luci-app-passwall回退到最后能编译的版本
+rm -rf feeds/PWluci/luci-app-passwall
+https://github.com/Openwrt-Passwall/openwrt-passwall/archive/6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8.zip -O unzip openwrt-passwall.zip
+unzip unzip openwrt-passwall.zip
+cp -r openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8/luci-app-passwall feeds/PWluci/
+rm -rf openwrt-passwall.zip openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8
+
 # 修改naiveproxy编译源码以支持mips_siflower
 # 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
 sed -i '/else ifeq (\$(ARCH_PREBUILT),mips_siflower)/,+1 d' \
