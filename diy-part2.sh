@@ -65,6 +65,9 @@ sed -i -E \
   -e 's|/include/lua5\.3|/include/lua5.4|g' \
   feeds/gl_feed_1806/haproxy/Makefile
 
+# haproxy去掉QUIC支持
+sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' package/feeds/gl_feed_1806/haproxy/Makefile
+
 # 修改golang源码以编译xray1.8.8+版本
 rm -rf feeds/gl_feed_common/golang
 git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/gl_feed_common/golang
