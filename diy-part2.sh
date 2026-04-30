@@ -29,9 +29,11 @@ cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
 # luci-app-passwall 回退到最后能编译的版本
+rm -rf feeds/luci2/applications/luci-app-passwall
 rm -rf feeds/PWluci/luci-app-passwall
 wget https://github.com/Openwrt-Passwall/openwrt-passwall/archive/6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8.zip -O openwrt-passwall.zip
 unzip openwrt-passwall.zip
+cp -r openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8/luci-app-passwall feeds/luci2/applications/
 cp -r openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8/luci-app-passwall feeds/PWluci/
 rm -rf openwrt-passwall.zip openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8
 
