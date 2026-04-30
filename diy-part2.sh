@@ -31,11 +31,11 @@ cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 # luci-app-passwall 回退到最后能编译的版本
 rm -rf feeds/luci2/applications/luci-app-passwall
 rm -rf feeds/PWluci/luci-app-passwall
-wget https://github.com/Openwrt-Passwall/openwrt-passwall/archive/6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8.zip -O openwrt-passwall.zip
+wget https://github.com/Openwrt-Passwall/openwrt-passwall/archive/0facd2a67ce5a12d963ef583eaba9cbec46d27af.zip -O openwrt-passwall.zip
 unzip openwrt-passwall.zip
-cp -r openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8/luci-app-passwall feeds/luci2/applications/
-cp -r openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8/luci-app-passwall feeds/PWluci/
-rm -rf openwrt-passwall.zip openwrt-passwall-6f60504dc6cf2b9f41e88ba0230c77b5ebfaace8
+cp -r openwrt-passwall-0facd2a67ce5a12d963ef583eaba9cbec46d27af/luci-app-passwall feeds/luci2/applications/
+cp -r openwrt-passwall-0facd2a67ce5a12d963ef583eaba9cbec46d27af/luci-app-passwall feeds/PWluci/
+rm -rf openwrt-passwall.zip openwrt-passwall-0facd2a67ce5a12d963ef583eaba9cbec46d27af
 
 # 修改naiveproxy编译源码以支持mips_siflower
 # 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
