@@ -77,9 +77,9 @@ sed -i -E \
 # haproxy去掉QUIC支持
 sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' feeds/gl_feed_1806/haproxy/Makefile
 
-# 修改golang源码以编译xray1.8.8+版本
+# 修改golang源码以编译xray26.9.9+版本
 rm -rf feeds/gl_feed_common/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 26.x feeds/gl_feed_common/golang
+git clone https://github.com/sbwml/packages_lang_golang -b 27.x feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 # 增加阿里云盘WebDAV 及其 LuCI
