@@ -17,8 +17,10 @@ rm -rf feeds/packages2/net/chinadns-ng
 rm -rf feeds/packages2/net/dns2socks
 rm -rf feeds/packages2/net/dns2tcp
 rm -rf feeds/packages2/net/microsocks
-# 保留 OpenWrt 18.06 原生 packages feed 中的 shadowsocks-libev。
-# 当前 PWpackages 已移除该目录；删掉旧包再复制会导致 ss-local/ss-redir 依赖永久缺失。
+# 翻墙组件尽量保持更新：使用 helloworld 当前 shadowsocks-libev，
+# 覆盖 18.06 packages 中的旧 3.1.3，同时保留 ss-local/ss-redir/config 完整包接口。
+rm -rf feeds/packages/net/shadowsocks-libev
+cp -a feeds/helloworld/shadowsocks-libev feeds/packages/net/
 cp -r feeds/packages2/lang/rust feeds/packages/lang
 cp -r feeds/PWpackages/xray-core feeds/packages2/net
 cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
@@ -43,20 +45,51 @@ cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwal
 rm -rf openwrt-passwall.zip openwrt-passwall-af831669039648788499961dd088cfad53eca1ae
 
 # OpenWrt 18.06 的 LuCI 本身就是 Lua 运行时，不需要现代 luci-compat/luci-lua-runtime。
-# 新版 luci-compat 会继续拉 luci-lib-base + ucode-mod-lua，而 18.06 没有完整 ucode 栈。
-for pw in   feeds/luci2/applications/luci-app-passwall/Makefile   feeds/PWluci/luci-app-passwall/Makefile; do
-  sed -i 's/[[:space:]]\+luci-compat//g' "$pw"
+# Passwall 在老 LuCI 上不需要 luci-compat，去掉显式依赖。
+for pw in \
+  feeds/luci2/applications/luci-app-passwall/Makefile \
+  feeds/PWluci/luci-app-passwall/Makefile; do
+  sed -i 's/+luci-compat//g' "$pw"
 done
+
+# 新版 luci2/luci.mk 会给所有 luasrc 包自动追加 luci-lua-runtime。
+# 这会让 luci-lib-ipkg 等旧 Lua 包被迫依赖 ucode；18.06 应继续使用原生 Lua LuCI。
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("feeds/luci2/luci.mk")
+s = p.read_text()
+block = """ifneq ($(wildcard ${CURDIR}/luasrc/*),)
+ ifneq ($(filter-out luci-lib-base luci-lua-runtime,$(PKG_NAME)),)
+  LUCI_DEPENDS += +luci-lua-runtime
+ endif
+endif
+
+"""
+if block in s:
+    s = s.replace(block, "", 1)
+else:
+    print("luci2/luci.mk runtime auto-dependency block already absent")
+p.write_text(s)
+PY
 
 for sym in luci-compat luci-lua-runtime luci-lib-base ucode-mod-lua; do
   sed -i "/^CONFIG_PACKAGE_${sym}=y$/d; /^# CONFIG_PACKAGE_${sym} is not set$/d" .config
   echo "# CONFIG_PACKAGE_${sym} is not set" >> .config
 done
 
-# packages2 里的现代 miniupnpd-iptables/nftables 与 18.06 的传统 miniupnpd 冲突，
-# 会产生 Kconfig 循环并让 luci-app-upnp 最终找不到 miniupnpd。保留旧 gl_feed_common 版本。
+# packages2 的现代 miniupnpd-iptables/nftables 与 18.06 的传统 miniupnpd 冲突。
 rm -rf feeds/packages2/net/miniupnpd-iptables feeds/packages2/net/miniupnpd-nftables
 rm -rf package/feeds/packages2/miniupnpd-iptables package/feeds/packages2/miniupnpd-nftables
+
+# 用 OpenWrt 18.06 官方 miniupnpd 做稳定兜底，保留 UPnP/NAT-PMP/PCP 功能。
+MINIUPNPD_1806_COMMIT=0171d18e051a0afdc5bc52b9e7913518b2e2a2a0
+rm -rf /tmp/packages-18.06.tar.gz "/tmp/packages-${MINIUPNPD_1806_COMMIT}"
+wget -q "https://github.com/openwrt/packages/archive/${MINIUPNPD_1806_COMMIT}.tar.gz" -O /tmp/packages-18.06.tar.gz
+tar -xzf /tmp/packages-18.06.tar.gz -C /tmp
+rm -rf feeds/gl_feed_common/miniupnpd
+cp -a "/tmp/packages-${MINIUPNPD_1806_COMMIT}/net/miniupnpd" feeds/gl_feed_common/
+rm -rf /tmp/packages-18.06.tar.gz "/tmp/packages-${MINIUPNPD_1806_COMMIT}"
 
 # naiveproxy: GL-SFT1200 的 ARCH_PACKAGES=mips_siflower，上游没有这个预编译名。
 # 映射到 klzgrad release 中实际存在的 mipsel_24kc-static 资产。
