@@ -113,7 +113,16 @@ jobs:
         cd openwrt
         git config --global user.email "you@example.com"
         git config --global user.name "Your Name"
-        python3 setup.py -c ./configs/config-siflower-18.x.yml && cd openwrt-18.06/siflower/openwrt-18.06        
+        python3 setup.py -c ./configs/config-siflower-18.x.yml
+        cd openwrt-18.06/siflower/openwrt-18.06
+
+        # OpenWrt 18.06 compatibility: current feeds pull dependencies too new for this tree.
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/luci.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_sft1200.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_common.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_depends.yml
+
+        python3 -c "import base64; exec(base64.b64decode('CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKcCA9IFBhdGgoInNjcmlwdHMvZ2VuX2NvbmZpZy5weSIpCnMgPSBwLnJlYWRfdGV4dCgpCgpuZWVkbGUgPSAiICAgIGdlbmVyYXRlX2NvbmZpZyhwcm9maWxlKVxuIgpob29rID0gKAogICAgIiAgICAjIENvbXBhdGliaWxpdHkgaG9vayBmb3IgR0wtU0ZUMTIwMCAvIFNpZmxvd2VyIE9wZW5XcnQgMTguMDYuXG4iCiAgICAiICAgIGNhbGwoJ2ZpbmQgcGFja2FnZS9mZWVkcyBmZWVkcyAtcGF0aCBcIipkbnNtYXNxL01ha2VmaWxlXCIgLXR5cGUgZiAtcHJpbnQwIDI+L2Rldi9udWxsIHwgeGFyZ3MgLTAgLXIgc2VkIC1pIFwicy8rUEFDS0FHRV9kbnNtYXNxX2Z1bGxfbmZ0c2V0Om5mdGFibGVzLWpzb24vL2dcIicsIHNoZWxsPVRydWUpXG4iCiAgICAiICAgIGNhbGwoJ2ZpbmQgcGFja2FnZS9mZWVkcyBmZWVkcyAtbWF4ZGVwdGggNSAtdHlwZSBkIC1uYW1lIFwic2FtYmE0XCIgLXBydW5lIC1leGVjIHJtIC1yZiB7fSArIDI+L2Rldi9udWxsIHx8IHRydWUnLCBzaGVsbD1UcnVlKVxuIgogICAgIiAgICBjYWxsKCdmaW5kIHBhY2thZ2UvZmVlZHMgZmVlZHMgLW1heGRlcHRoIDUgLXR5cGUgZCBcXCggIgogICAgIi1uYW1lIFwicHl0aG9uMy1jcnlwdG9kb21lXCIgLW8gIgogICAgIi1uYW1lIFwicHl0aG9uMy1pbmZsdXhkYlwiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtcmVxdWVzdHNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWFpb2h0dHBcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWFpb2h0dHAtY29yc1wiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtYXR0cnNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXNlbnRyeS1zZGtcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWNlcnRpZmlcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWRhdGV1dGlsXCIgLW8gIgogICAgIi1uYW1lIFwicHl0aG9uMy1kbnNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWlkbmFcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXlhcmxcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXB5dHpcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXNpeFwiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtanNvbnBhdGgtbmdcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXBseVwiICIKICAgICJcXCkgLXBydW5lIC1leGVjIHJtIC1yZiB7fSArIDI+L2Rldi9udWxsIHx8IHRydWUnLCBzaGVsbD1UcnVlKVxuIgogICAgIiAgICBnZW5lcmF0ZV9jb25maWcocHJvZmlsZSlcbiIKKQoKaWYgIkNvbXBhdGliaWxpdHkgaG9vayBmb3IgR0wtU0ZUMTIwMCIgbm90IGluIHM6CiAgICBpZiBuZWVkbGUgbm90IGluIHM6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiZ2VuZXJhdGVfY29uZmlnKHByb2ZpbGUpIG5vdCBmb3VuZCBpbiBzY3JpcHRzL2dlbl9jb25maWcucHkiKQogICAgcyA9IHMucmVwbGFjZShuZWVkbGUsIGhvb2ssIDEpCiAgICBwLndyaXRlX3RleHQocykKICAgIHByaW50KCJQYXRjaGVkIHNjcmlwdHMvZ2VuX2NvbmZpZy5weSIpCmVsc2U6CiAgICBwcmludCgic2NyaXB0cy9nZW5fY29uZmlnLnB5IGFscmVhZHkgcGF0Y2hlZCIpCg=='))"
         ./scripts/gen_config.py target_siflower_gl-sft1200 luci
 
     - name: Load custom feeds
@@ -209,7 +218,7 @@ jobs:
 
     - name: Generate release tag
       id: tag
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
@@ -219,7 +228,7 @@ jobs:
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v3
-      if: steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
