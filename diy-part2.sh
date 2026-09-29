@@ -46,14 +46,30 @@ else ifeq ($(ARCH_PREBUILT),mips_siflower)\
   ARCH_PREBUILT:=mipsel_24kc-static' \
 feeds/PWpackages/naiveproxy/Makefile
 
-# 不再改写上游整段 hash 条件树；直接在后面追加覆盖，避免上游分支顺序变化导致 sed 失效。
-cat >> feeds/PWpackages/naiveproxy/Makefile <<'EOF'
+# OpenWrt 18.06 的 download.pl 不接受 PKG_HASH:=dummy。
+# 必须在 BuildPackage 展开前，把 mipsel_24kc-static 的 SHA256 插入上游 hash 条件树。
+python3 - <<'PY'
+from pathlib import Path
 
-# GL-SFT1200 compatibility override
-ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)
-  PKG_HASH:=6a6a5294cf5063dbb89192c909dcd4068dd7a4309b3a7dcb0e187442cb2fc291
-endif
-EOF
+p = Path("feeds/PWpackages/naiveproxy/Makefile")
+s = p.read_text()
+sha256 = "6a6a5294cf5063dbb89192c909dcd4068dd7a4309b3a7dcb0e187442cb2fc291"
+needle = "else\n  PKG_HASH:=dummy\nendif"
+replacement = (
+    "else ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n"
+    f"  PKG_HASH:={sha256}\n"
+    "else\n"
+    "  PKG_HASH:=dummy\n"
+    "endif"
+)
+
+if "ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=" not in s:
+    if needle not in s:
+        raise SystemExit("naiveproxy hash fallback block not found")
+    s = s.replace(needle, replacement, 1)
+
+p.write_text(s)
+PY
 
 # 解包统一使用 $(PKG_SOURCE)，避免文件名逻辑漂移。
 sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
