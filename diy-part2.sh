@@ -28,6 +28,11 @@ cp -r feeds/helloworld/dns2tcp feeds/packages2/net
 cp -r feeds/PWpackages/microsocks feeds/packages2/net
 cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
 
+# OpenWrt 18.06 的 Build/Configure/Default 只在 configure 具有可执行权限时才会执行。
+# 当前 Passwall shadowsocksr-libev/src/configure 在 Git 中是 100644，导致 configure 被静默跳过，
+# 最终构建目录没有生成 Makefile。先补执行权限，让后续 autoreconf/configure 正常落地。
+chmod +x feeds/PWpackages/shadowsocksr-libev/src/configure
+
 # luci-app-passwall 回退到最后能编译的版本
 rm -rf feeds/luci2/applications/luci-app-passwall
 rm -rf feeds/PWluci/luci-app-passwall
