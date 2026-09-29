@@ -37,24 +37,25 @@ cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwal
 cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwall feeds/PWluci/
 rm -rf openwrt-passwall.zip openwrt-passwall-af831669039648788499961dd088cfad53eca1ae
 
-# 修改naiveproxy编译源码以支持mips_siflower
-# 1) 先删除（如果有）之前误插入的 mips_siflower 映射两行，避免重复
+# naiveproxy: GL-SFT1200 的 ARCH_PACKAGES=mips_siflower，上游没有这个预编译名。
+# 映射到 klzgrad release 中实际存在的 mipsel_24kc-static 资产。
 sed -i '/else ifeq (\$(ARCH_PREBUILT),mips_siflower)/,+1 d' \
 feeds/PWpackages/naiveproxy/Makefile
-
-# 2) 把 mips_siflower -> mipsel_24kc-static 正确插到 “ARCH_PREBUILT:=riscv64” 这一行之后
-#    （注意：锚点是赋值行，而不是 “riscv64_riscv64)” 的条件行）
 sed -i '/^[[:space:]]*ARCH_PREBUILT:=riscv64[[:space:]]*$/a\
 else ifeq ($(ARCH_PREBUILT),mips_siflower)\
   ARCH_PREBUILT:=mipsel_24kc-static' \
 feeds/PWpackages/naiveproxy/Makefile
 
-# 3) 修复并收尾 PKG_HASH 分支
-sed -i '/^else ifeq (\$(ARCH_PREBUILT),x86_64)/,/^endif/ c\
-else ifeq ($(ARCH_PREBUILT),x86_64)\n  PKG_HASH:=5fce9437c84c2cec6322753c424c5f2f5621cc91d6aa3743650e6d7b54407a44\nelse ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=6a6a5294cf5063dbb89192c909dcd4068dd7a4309b3a7dcb0e187442cb2fc291\nelse\n  PKG_HASH:=dummy\nendif' \
-feeds/PWpackages/naiveproxy/Makefile
+# 不再改写上游整段 hash 条件树；直接在后面追加覆盖，避免上游分支顺序变化导致 sed 失效。
+cat >> feeds/PWpackages/naiveproxy/Makefile <<'EOF'
 
-# 4) （推荐）让解包动作使用 $(PKG_SOURCE)，避免文件名不同步
+# GL-SFT1200 compatibility override
+ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)
+  PKG_HASH:=6a6a5294cf5063dbb89192c909dcd4068dd7a4309b3a7dcb0e187442cb2fc291
+endif
+EOF
+
+# 解包统一使用 $(PKG_SOURCE)，避免文件名逻辑漂移。
 sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
 feeds/PWpackages/naiveproxy/Makefile
 
