@@ -158,6 +158,7 @@ jobs:
         echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore source download cache
+      id: dl-cache
       uses: actions/cache@v6
       with:
         path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
@@ -215,6 +216,7 @@ jobs:
         } | sha256sum | awk '{print "hash="$1}' >> "$GITHUB_OUTPUT"
 
     - name: Restore compiler cache
+      id: build-cache-restore
       uses: actions/cache@v6
       with:
         path: |
@@ -226,6 +228,7 @@ jobs:
         key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
         restore-keys: |
           sft1200-buildcache-${{ runner.os }}-
+          sft1200-ccache-${{ runner.os }}-
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -239,6 +242,13 @@ jobs:
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         make download -j8
+
+    - name: Save source download cache
+      if: steps.package.conclusion == 'success' && steps.dl-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
+        key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
         
     - name: Compile the firmware
       id: compile
@@ -248,11 +258,29 @@ jobs:
         echo "Restored ccache directories:"
         du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
 
-        # Keep the Actions console small. The complete build output stays in
-        # build.log and is uploaded as an artifact when compilation fails.
+        # 完整编译输出写入 build.log，避免 Actions 页面被巨量日志截断。
+        # 后台每 5 分钟输出一次心跳，便于区分“仍在编译”和“进程已经卡住”。
         set +e
-        make -j$(nproc) > build.log 2>&1
+        make -j$(nproc) > build.log 2>&1 &
+        build_pid=$!
+
+        (
+          while kill -0 "$build_pid" 2>/dev/null; do
+            sleep 300
+            kill -0 "$build_pid" 2>/dev/null || break
+            printf '[编译心跳] %s | build.log=%s | ' \
+              "$(date '+%Y-%m-%d %H:%M:%S')" \
+              "$(du -h build.log 2>/dev/null | awk '{print $1}')"
+            tail -n 1 build.log 2>/dev/null || true
+          done
+        ) &
+        heartbeat_pid=$!
+
+        wait "$build_pid"
         build_status=$?
+
+        kill "$heartbeat_pid" 2>/dev/null || true
+        wait "$heartbeat_pid" 2>/dev/null || true
         set -e
 
         if [ "$build_status" -ne 0 ]; then
@@ -296,20 +324,22 @@ jobs:
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
+    - name: Save compiler cache
+      if: steps.compile.outputs.status == 'success' && steps.build-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/.cache/go-build
+        key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
+
     - name: Validate firmware manifest
       id: manifest
       if: steps.compile.outputs.status == 'success'
       run: |
         set -Eeuo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-
-        manifest="$(find bin/targets/siflower -type f -name '*.manifest' | head -n1)"
-        [ -n "$manifest" ] && [ -s "$manifest" ] || {
-          echo "ERROR: 未找到固件 manifest"
-          exit 1
-        }
-
-        awk '{print $1}' "$manifest" | sort -u > /tmp/sft1200-installed-packages.txt
 
         required_packages=(
           luci-app-passwall
@@ -331,9 +361,66 @@ jobs:
           luci-app-aliyundrive-webdav
         )
 
+        mapfile -t manifests < <(
+          find bin/targets/siflower -type f -name '*.manifest' -size +0c -print | sort
+        )
+
+        if [ "${#manifests[@]}" -eq 0 ]; then
+          echo "ERROR: 未找到固件 manifest"
+          exit 1
+        fi
+
+        echo "发现 ${#manifests[@]} 份 manifest："
+        printf '  %s\n' "${manifests[@]}"
+
+        best_manifest=""
+        best_packages=""
+        best_matches=-1
+
+        for manifest in "${manifests[@]}"; do
+          pkg_list="$(mktemp)"
+
+          # Siflower 18.06 正常格式来自 opkg list-installed：
+          #   package-name - version
+          # 同时兼容部分工具可能生成的 control 格式：
+          #   Package: package-name
+          awk '
+            /^Package:[[:space:]]+/ {
+              print $2
+              next
+            }
+            NF >= 3 && $2 == "-" {
+              print $1
+              next
+            }
+          ' "$manifest" | sort -u > "$pkg_list"
+
+          matches=0
+          for pkg in "${required_packages[@]}"; do
+            if grep -Fxq "$pkg" "$pkg_list"; then
+              matches=$((matches + 1))
+            fi
+          done
+
+          printf 'manifest 候选：%s -> 命中 %d/%d 个关键包\n' \
+            "$manifest" "$matches" "${#required_packages[@]}"
+
+          if [ "$matches" -gt "$best_matches" ]; then
+            [ -z "$best_packages" ] || rm -f "$best_packages"
+            best_manifest="$manifest"
+            best_packages="$pkg_list"
+            best_matches="$matches"
+          else
+            rm -f "$pkg_list"
+          fi
+        done
+
+        echo "选用 manifest：$best_manifest"
+        echo "关键包命中：$best_matches/${#required_packages[@]}"
+
         missing=0
         for pkg in "${required_packages[@]}"; do
-          if grep -Fxq "$pkg" /tmp/sft1200-installed-packages.txt; then
+          if grep -Fxq "$pkg" "$best_packages"; then
             printf 'OK   %s\n' "$pkg"
           else
             printf 'MISS %s\n' "$pkg"
@@ -342,11 +429,17 @@ jobs:
         done
 
         if [ "$missing" -ne 0 ]; then
-          echo "ERROR: 编译成功，但关键功能包没有全部进入固件。"
+          echo
+          echo "选中 manifest 的前 40 行："
+          head -n 40 "$best_manifest" || true
+          echo
+          echo "ERROR: 编译成功，但关键功能包没有全部进入同一份最终固件 manifest。"
+          rm -f "$best_packages"
           exit 1
         fi
 
-        echo "固件功能完整性检查通过：$manifest"
+        rm -f "$best_packages"
+        echo "固件功能完整性检查通过：$best_manifest"
         echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: Upload build diagnostics
