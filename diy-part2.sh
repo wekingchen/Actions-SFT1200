@@ -44,16 +44,17 @@ cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwal
 cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwall feeds/PWluci/
 rm -rf openwrt-passwall.zip openwrt-passwall-af831669039648788499961dd088cfad53eca1ae
 
-# OpenWrt 18.06 的 LuCI 本身就是 Lua 运行时，不需要现代 luci-compat/luci-lua-runtime。
-# Passwall 在老 LuCI 上不需要 luci-compat，去掉显式依赖。
-for pw in \
-  feeds/luci2/applications/luci-app-passwall/Makefile \
-  feeds/PWluci/luci-app-passwall/Makefile; do
-  sed -i 's/+luci-compat//g' "$pw"
-done
+# OpenWrt 18.06 原生就是 Lua LuCI；luci2 中的现代兼容层会反向拉入 ucode。
+# 对 18.06 来说，这些只是“新 LuCI 兼容旧 Lua”的桥接包，不是实际功能本体。
+# 为避免 make defconfig 再次把它们选回来，既清理依赖，也移除对应现代包入口。
+find feeds/luci2 -type f -name Makefile -print0 | xargs -0 -r sed -i \
+  -e 's/+luci-compat//g' \
+  -e 's/+luci-lua-runtime//g' \
+  -e 's/+luci-lib-base//g' \
+  -e 's/+ucode-mod-lua//g'
 
-# 新版 luci2/luci.mk 会给所有 luasrc 包自动追加 luci-lua-runtime。
-# 这会让 luci-lib-ipkg 等旧 Lua 包被迫依赖 ucode；18.06 应继续使用原生 Lua LuCI。
+# 新版 luci2/luci.mk 会给带 luasrc 的包自动追加 luci-lua-runtime；
+# 18.06 必须继续使用自身原生 Lua LuCI，删除这段自动依赖。
 python3 - <<'PY'
 from pathlib import Path
 
@@ -68,13 +69,21 @@ endif
 """
 if block in s:
     s = s.replace(block, "", 1)
-else:
-    print("luci2/luci.mk runtime auto-dependency block already absent")
 p.write_text(s)
 PY
 
+rm -rf \
+  feeds/luci2/modules/luci-compat \
+  feeds/luci2/modules/luci-lua-runtime \
+  feeds/luci2/libs/luci-lib-base \
+  feeds/luci2/contrib/package/ucode-mod-lua \
+  package/feeds/luci2/luci-compat \
+  package/feeds/luci2/luci-lua-runtime \
+  package/feeds/luci2/luci-lib-base \
+  package/feeds/luci2/ucode-mod-lua
+
 for sym in luci-compat luci-lua-runtime luci-lib-base ucode-mod-lua; do
-  sed -i "/^CONFIG_PACKAGE_${sym}=y$/d; /^# CONFIG_PACKAGE_${sym} is not set$/d" .config
+  sed -i "/^CONFIG_PACKAGE_${sym}=[ym]$/d; /^# CONFIG_PACKAGE_${sym} is not set$/d" .config
   echo "# CONFIG_PACKAGE_${sym} is not set" >> .config
 done
 
@@ -186,7 +195,33 @@ done
 make defconfig
 
 echo "=== SFT1200 dependency sync check ==="
-grep -E '^CONFIG_PACKAGE_(shadowsocks-libev-config|shadowsocks-libev-ss-local|shadowsocks-libev-ss-redir|miniupnpd)=y$' .config || true
+grep -E '^CONFIG_PACKAGE_(shadowsocks-libev-config|shadowsocks-libev-ss-local|shadowsocks-libev-ss-redir|miniupnpd)=[ym]
+# 修复 host ncurses 静态库 relocation 错误
+sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' package/libs/ncurses/Makefile
+
+# 清理老的 hostpkg ncurses —— 用内置目标更安全，且不存在也不会失败
+make package/ncurses/host/clean || true
+
+# 强制只用动态库 —— 目录不存在时直接跳过，避免 find 报错
+if [ -d staging_dir/hostpkg/lib ]; then
+  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
+  find staging_dir/hostpkg/lib -type f -name 'libpanel.a'   -delete || true
+fi
+
+# 运行时库搜索路径（LD_LIBRARY_PATH 可能为空，给默认值）
+export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:${LD_LIBRARY_PATH:-}"
+ .config || true
+echo "=== incompatible modern LuCI packages ==="
+bad_luci=0
+for sym in luci-compat luci-lua-runtime luci-lib-base ucode-mod-lua; do
+  if grep -Eq "^CONFIG_PACKAGE_${sym}=[ym]$" .config; then
+    echo "ERROR: incompatible package was re-selected: ${sym}"
+    bad_luci=1
+  fi
+done
+if [ "$bad_luci" -ne 0 ]; then
+  exit 1
+fi
 echo "===================================="
 
 # 修复 host ncurses 静态库 relocation 错误
