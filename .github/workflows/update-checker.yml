@@ -3,7 +3,7 @@
 # 监控 Passwall packages/UI 与 helloworld；发现新提交后触发主构建工作流。
 #
 
-name: Update Checker
+name: SFT1200 上游更新检查
 
 on:
   workflow_dispatch:
@@ -23,10 +23,11 @@ env:
 
 jobs:
   check:
+    name: 检查代理组件上游
     runs-on: ubuntu-22.04
 
     steps:
-      - name: Get upstream commits
+      - name: 获取上游最新提交
         id: upstream
         run: |
           set -Eeuo pipefail
@@ -52,24 +53,24 @@ jobs:
           )"
 
           echo "combined_hash=$combined_hash" >> "$GITHUB_OUTPUT"
-          echo "Passwall packages HEAD: $packages_hash"
-          echo "Passwall UI HEAD:       $ui_hash"
-          echo "helloworld HEAD:        $helloworld_hash"
-          echo "Combined fingerprint:   $combined_hash"
+          echo "Passwall packages 最新提交：$packages_hash"
+          echo "Passwall UI 最新提交：      $ui_hash"
+          echo "helloworld 最新提交：       $helloworld_hash"
+          echo "上游组合指纹：              $combined_hash"
 
-      - name: Check whether these commits were seen
+      - name: 检查当前上游版本是否已处理
         id: upstream-cache
         uses: actions/cache/restore@v6
         with:
           path: .upstream-commit
           key: proxy-upstream-${{ steps.upstream.outputs.combined_hash }}
 
-      - name: Record new upstream commit
+      - name: 记录新的上游版本
         if: steps.upstream-cache.outputs.cache-hit != 'true'
         run: |
           printf '%s\n' '${{ steps.upstream.outputs.combined_hash }}' > .upstream-commit
 
-      - name: Trigger OpenWrt build
+      - name: 触发 SFT1200 固件编译
         id: trigger-build
         if: steps.upstream-cache.outputs.cache-hit != 'true'
         env:
@@ -80,14 +81,14 @@ jobs:
             -f event_type='Source Code Update' \
             --silent
 
-      - name: Save upstream state
+      - name: 保存上游版本状态
         if: steps.upstream-cache.outputs.cache-hit != 'true' && steps.trigger-build.conclusion == 'success'
         uses: actions/cache/save@v6
         with:
           path: .upstream-commit
           key: proxy-upstream-${{ steps.upstream.outputs.combined_hash }}
 
-      - name: Clean old checker runs
+      - name: 清理旧检查记录
         if: always() && !cancelled()
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,7 +112,7 @@ jobs:
             created_epoch="$(date -u -d "$created_at" +%s)"
 
             if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
-              echo "Delete checker run ${run_id} (${created_at})"
+              echo "删除旧检查记录 ${run_id}（${created_at}）"
               gh api -X DELETE \
                 "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
                 --silent
