@@ -118,6 +118,14 @@ jobs:
           require('awk \'NF >= 3 && $2 == "-" {print $1}\'' in build,
                   "manifest 解析格式与 Siflower 18.06 opkg list-installed 不一致")
 
+          # 每个 diy-part2 功能段只能出现一次，防止分步编辑时把脚本尾部重复拼接。
+          import re
+          sections = re.findall(r'^section "([^"]+)"', diy2, flags=re.MULTILINE)
+          duplicates = sorted({name for name in sections if sections.count(name) > 1})
+          require(not duplicates, f"diy-part2.sh 存在重复 section：{duplicates}")
+          require(sections and sections[-1] == "diy-part2 执行完成",
+                  "diy-part2.sh 结尾 section 不完整")
+
           # 已明确弃用的 trojan-plus 不应再被配置或强制保留。
           for label, text in {
               ".config": config,
