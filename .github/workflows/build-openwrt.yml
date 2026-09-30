@@ -11,9 +11,6 @@
 name: Build OpenWrt
 
 on:
-  push:
-    branches:
-      - test/build-openwrt-20260929
   repository_dispatch:
   workflow_dispatch:
     inputs:
@@ -217,21 +214,39 @@ jobs:
         echo "Restored ccache directories:"
         du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
 
-        # Normal builds use OpenWrt's concise output. V=s produced tens of MB
-        # of console text and caused GitHub to truncate the step log.
+        # Keep the Actions console small. The complete build output stays in
+        # build.log and is uploaded as an artifact when compilation fails.
         set +e
-        make -j$(nproc) 2>&1 | tee build.log
-        build_status=${PIPESTATUS[0]}
+        make -j$(nproc) > build.log 2>&1
+        build_status=$?
         set -e
 
         if [ "$build_status" -ne 0 ]; then
-          echo "::group::Detailed single-thread retry (V=s)"
-          set +e
-          make -j1 V=s 2>&1 | tee build-failure.log
-          set -e
+          echo "::group::Parallel build error summary"
+          grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build.log | tail -n 200 || true
+          echo
+          echo "Last 200 lines of build.log:"
+          tail -n 200 build.log || true
           echo "::endgroup::"
+
+          echo "::group::Single-thread diagnostic retry"
+          set +e
+          make -j1 V=s > build-failure.log 2>&1
+          retry_status=$?
+          set -e
+          grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build-failure.log | tail -n 250 || true
+          echo
+          echo "Last 300 lines of build-failure.log:"
+          tail -n 300 build-failure.log || true
+          echo "Single-thread retry exit status: $retry_status"
+          echo "::endgroup::"
+
           exit "$build_status"
         fi
+
+        echo "Build completed successfully."
+        echo "Last 40 lines of build.log:"
+        tail -n 40 build.log || true
 
         if [ -x staging_dir/host/bin/ccache ]; then
           echo "=== ccache statistics ==="
@@ -264,7 +279,7 @@ jobs:
       run: df -hT
 
     - name: Upload bin directory
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
@@ -280,7 +295,7 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware directory
-      uses: actions/upload-artifact@main
+      uses: actions/upload-artifact@v4
       if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
         name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
