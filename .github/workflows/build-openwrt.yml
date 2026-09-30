@@ -119,9 +119,13 @@ jobs:
               "Release tag 未受 manifest 验收控制",
           )
           require(
-              "steps.manifest.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
+              "steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
               in build,
-              "Release 上传未受 manifest 验收控制",
+              "Release 上传未受 manifest / 配置留档成功控制",
+          )
+          require(
+              "if: steps.release-upload.conclusion == 'success' && !cancelled()" in build,
+              "旧 Release 清理没有绑定本轮 Release 成功状态",
           )
 
           # manifest 只能验证 SFT1200 image manifest，不能误取 Packages.manifest。
@@ -693,8 +697,9 @@ jobs:
         echo "status=success" >> $GITHUB_OUTPUT
 
     - name: Upload firmware to release
+      id: release-upload
       uses: softprops/action-gh-release@v3
-      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -742,7 +747,9 @@ jobs:
         done
 
     - name: Remove old Releases
-      if: env.UPLOAD_RELEASE == 'true' && !cancelled()
+      # 只有本轮固件已经成功创建 Release 后才做保留数量清理。
+      # 编译 / manifest / 配置留档任一步失败时都不触碰现有 Release。
+      if: steps.release-upload.conclusion == 'success' && !cancelled()
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
