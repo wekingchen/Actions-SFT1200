@@ -26,9 +26,9 @@
 
 ## GitHub Actions
 
-### Build OpenWrt
+### SFT1200 固件编译
 
-手动进入 **Actions → Build OpenWrt → Run workflow** 即可编译。
+手动进入 **Actions → SFT1200 固件编译 → Run workflow** 即可编译。
 
 工作流包含：
 
@@ -42,7 +42,7 @@
 - 编译成功后上传 `bin` Artifact 与 Release；Release 同时附带配置留档
 - 自动清理旧 Workflow Runs；只有本轮固件成功发布 Release 后，才清理旧 Releases 并保留最近 10 个，失败构建不会占用或挤掉 Release 位置。
 
-### Update Checker
+### SFT1200 上游更新检查
 
 每 12 小时检查一次：
 
