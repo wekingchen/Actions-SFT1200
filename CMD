@@ -31,5 +31,18 @@ GITHUB_WORKSPACE="$REPO_ROOT" bash "$REPO_ROOT/diy-part2.sh"
 make download -j8
 make -j"$(nproc)"
 
+# 编译成功后，如需在本地生成与 GitHub Actions 相同的配置留档：
+# repository.config = 仓库长期维护基线；final.config = 本次实际构建配置。
+"$REPO_ROOT/scripts/archive-config.sh" \
+  "$REPO_ROOT/.config" \
+  "$PWD/.config" \
+  "$PWD/config-record"
+
+# 生成后优先查看：
+#   config-record/config-changes.diff  仓库基线与最终配置的语义差异
+#   config-record/diffconfig.txt       相对 OpenWrt 默认值的有效配置
+#   config-record/final.config         本次固件真实使用的完整配置
+# 确认变化确实应该长期保留后，才把 final.config 复制回仓库根目录 .config。
+
 # 如需详细错误日志：
 # make -j1 V=s
