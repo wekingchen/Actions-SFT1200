@@ -361,6 +361,79 @@ download_cached \
   "dl/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe"
 
 
+section "OpenWrt 18.06 CMake + ccache compatibility"
+
+# OpenWrt 18.06 passes ccache itself as CMAKE_C_COMPILER and relies on
+# CMAKE_*_COMPILER_ARG1 for the real cross compiler. With the newer CMake
+# available on the current build host this breaks compiler checks (ccache sees
+# flags such as -pipe as its own arguments). Use CMake's compiler launcher
+# support instead: keep the real compiler in CMAKE_*_COMPILER and place ccache
+# in front of it with CMAKE_*_COMPILER_LAUNCHER.
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("include/cmake.mk")
+text = path.read_text()
+
+old = """ifeq ($(CONFIG_CCACHE),)
+ CMAKE_C_COMPILER:=$(call cmake_tool,$(TARGET_CC))
+ CMAKE_CXX_COMPILER:=$(call cmake_tool,$(TARGET_CXX))
+ CMAKE_C_COMPILER_ARG1:=
+ CMAKE_CXX_COMPILER_ARG1:=
+else
+  CCACHE:=$(STAGING_DIR_HOST)/bin/ccache
+  CMAKE_C_COMPILER:=$(CCACHE)
+  CMAKE_C_COMPILER_ARG1:=$(TARGET_CC_NOCACHE)
+  CMAKE_CXX_COMPILER:=$(CCACHE)
+  CMAKE_CXX_COMPILER_ARG1:=$(TARGET_CXX_NOCACHE)
+endif
+"""
+
+new = """ifeq ($(CONFIG_CCACHE),)
+ CMAKE_C_COMPILER:=$(call cmake_tool,$(TARGET_CC))
+ CMAKE_CXX_COMPILER:=$(call cmake_tool,$(TARGET_CXX))
+ CMAKE_C_COMPILER_ARG1:=
+ CMAKE_CXX_COMPILER_ARG1:=
+ CMAKE_C_COMPILER_LAUNCHER:=
+ CMAKE_CXX_COMPILER_LAUNCHER:=
+else
+  CCACHE:=$(STAGING_DIR_HOST)/bin/ccache
+  CMAKE_C_COMPILER:=$(call cmake_tool,$(TARGET_CC_NOCACHE))
+  CMAKE_CXX_COMPILER:=$(call cmake_tool,$(TARGET_CXX_NOCACHE))
+  CMAKE_C_COMPILER_ARG1:=
+  CMAKE_CXX_COMPILER_ARG1:=
+  CMAKE_C_COMPILER_LAUNCHER:=$(CCACHE)
+  CMAKE_CXX_COMPILER_LAUNCHER:=$(CCACHE)
+endif
+"""
+
+if old in text:
+    text = text.replace(old, new, 1)
+elif new not in text:
+    raise SystemExit("include/cmake.mk ccache compiler block not found")
+
+old_args = """			-DCMAKE_CXX_COMPILER_ARG1="$(CMAKE_CXX_COMPILER_ARG1)" \
+			-DCMAKE_ASM_COMPILER="$(CMAKE_C_COMPILER)" \
+			-DCMAKE_ASM_COMPILER_ARG1="$(CMAKE_C_COMPILER_ARG1)" \
+"""
+
+new_args = """			-DCMAKE_CXX_COMPILER_ARG1="$(CMAKE_CXX_COMPILER_ARG1)" \
+			-DCMAKE_C_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \
+			-DCMAKE_CXX_COMPILER_LAUNCHER="$(CMAKE_CXX_COMPILER_LAUNCHER)" \
+			-DCMAKE_ASM_COMPILER="$(CMAKE_C_COMPILER)" \
+			-DCMAKE_ASM_COMPILER_ARG1="$(CMAKE_C_COMPILER_ARG1)" \
+			-DCMAKE_ASM_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \
+"""
+
+if old_args in text:
+    text = text.replace(old_args, new_args, 1)
+elif "CMAKE_C_COMPILER_LAUNCHER" not in text[text.find("define Build/Configure/Default"):]:
+    raise SystemExit("include/cmake.mk CMake argument block not found")
+
+path.write_text(text)
+PY
+
+
 section "Synchronize configuration"
 
 # Reinstall the replaced package link and refresh package metadata after all
