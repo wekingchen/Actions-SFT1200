@@ -1,18 +1,17 @@
 #!/usr/bin/env bash
 #
-# SFT1200 / Siflower OpenWrt 18.06 compatibility layer
-# Runs after feeds have been updated and installed.
+# SFT1200 / Siflower OpenWrt 18.06 兼容处理脚本
+# 在 feeds update / install 完成后执行。
 #
-# Maintenance policy:
-#   1. Keep proxy/bypass components reasonably current.
-#   2. Keep the OpenWrt 18.06 base conservative and buildable.
-#   3. Preserve existing features; prefer compatibility shims over removal.
+# 维护原则：
+#   1. 代理、分流相关组件尽量跟随上游更新。
+#   2. OpenWrt 18.06 系统底座以稳定、可编译为第一优先级。
+#   3. 不为了编译通过而删功能，优先通过兼容补丁解决新旧依赖差异。
 #
 
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-readonly PASSWALL_COMMIT="af831669039648788499961dd088cfad53eca1ae"
 readonly MINIUPNPD_1806_COMMIT="0171d18e051a0afdc5bc52b9e7913518b2e2a2a0"
 readonly GOLANG_BRANCH="27.x"
 readonly NAIVEPROXY_ARCH="mipsel_24kc-static"
@@ -93,7 +92,7 @@ configure_naiveproxy() {
   echo "NaiveProxy: version=${version}, release=${release}, arch=${NAIVEPROXY_ARCH}"
   download_cached "$url" "$archive"
 
-  # Reject HTML/error pages or corrupted cache entries before calculating the hash.
+  # 计算 HASH 前先确认下载内容确实是可解压的 xz 包，避免把错误页写成 HASH。
   if ! tar -tJf "$archive" >/dev/null 2>&1; then
     rm -f "$archive"
     die "Invalid NaiveProxy release archive: $asset"
@@ -112,8 +111,8 @@ arch = sys.argv[2]
 sha256 = sys.argv[3]
 text = path.read_text()
 
-# Map the Siflower package architecture to the static MIPS asset published by
-# NaiveProxy. Work on the architecture mapping block only.
+# 将 Siflower 的自定义架构映射到 NaiveProxy 官方发布的 MIPS 静态包。
+# 这里只修改架构映射区块，避免影响其他架构。
 arch_start = text.find("ARCH_PREBUILT:=$(ARCH_PACKAGES)")
 arch_end = text.find("\nendif\n\nPKG_SOURCE:=", arch_start)
 if arch_start < 0 or arch_end < 0:
@@ -136,8 +135,8 @@ if "mips_siflower" not in arch_block:
 
 text = text[:arch_start] + arch_block + text[arch_end + len("\nendif"):]
 
-# OpenWrt 18.06 download.pl does not accept PKG_HASH:=dummy. Inject or refresh
-# the hash for the static Siflower-compatible asset before BuildPackage expands.
+# OpenWrt 18.06 的 download.pl 不接受 PKG_HASH:=dummy。
+# 在 BuildPackage 展开前，自动写入当前 Siflower 静态包的真实 SHA256。
 hash_start = text.find("ifeq ($(ARCH_PREBUILT),", text.find("PKG_SOURCE_URL:="))
 hash_end = text.find("\nendif\n\nPKG_LICENSE", hash_start)
 if hash_start < 0 or hash_end < 0:
@@ -168,7 +167,7 @@ else:
 
 text = text[:hash_start] + hash_block + text[hash_end + len("\nendif"):]
 
-# Keep extraction tied to PKG_SOURCE so future filename changes stay consistent.
+# 解压文件统一使用 PKG_SOURCE，后续上游调整文件名时不需要再额外同步这里。
 text = text.replace(
     "$(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz",
     "$(DL_DIR)/$(PKG_SOURCE)",
@@ -179,10 +178,9 @@ PY
 }
 
 
-section "Proxy packages"
+section "代理组件"
 
-# Prefer current proxy engines from Passwall/helloworld over stale copies in the
-# generic packages feed.
+# 代理核心优先使用 Passwall / helloworld 当前版本，覆盖 packages2 中可能较旧的副本。
 for pkg in xray-core v2ray-geodata sing-box chinadns-ng dns2socks dns2tcp microsocks; do
   rm -rf "feeds/packages2/net/${pkg}"
 done
@@ -195,37 +193,61 @@ replace_dir feeds/PWpackages/dns2socks        feeds/packages2/net/dns2socks
 replace_dir feeds/helloworld/dns2tcp          feeds/packages2/net/dns2tcp
 replace_dir feeds/PWpackages/microsocks       feeds/packages2/net/microsocks
 
-# Keep the newer Shadowsocks package interface required by SSR Plus
-# (ss-local/ss-redir plus shadowsocks-libev-config).
+# SSR Plus 需要新版 Shadowsocks 的完整包接口：
+# ss-local / ss-redir / shadowsocks-libev-config。
 replace_dir feeds/helloworld/shadowsocks-libev feeds/packages/net/shadowsocks-libev
 
-# Keep Rust current enough for modern proxy packages.
+# 保持较新的 Rust 工具链，以满足现代代理组件的编译要求。
 replace_dir feeds/packages2/lang/rust feeds/packages/lang/rust
 
-# OpenWrt 18.06 only runs Build/Configure/Default when ./configure is executable.
+# Passwall 26.9.x 开始新增 lyaml 硬依赖，而原始 OpenWrt 18.06 packages 没有该包。
+# 从 packages2 引入 lyaml，同时去掉只服务现代 macOS Host 的 fakeuname 依赖，
+# 保留 Linux GitHub Runner 真正需要的 lua/host + luarocks/host 构建链。
+replace_dir feeds/packages2/lang/lyaml feeds/packages/lang/lyaml
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("feeds/packages/lang/lyaml/Makefile")
+text = path.read_text()
+
+old_dep = "PKG_BUILD_DEPENDS:=lua/host luarocks/host HOST_OS_MACOS:fakeuname/host"
+new_dep = "PKG_BUILD_DEPENDS:=lua/host luarocks/host"
+
+if old_dep in text:
+    text = text.replace(old_dep, new_dep, 1)
+elif new_dep not in text:
+    raise SystemExit("lyaml host build dependency block not found")
+
+start = text.find("ifeq ($(CONFIG_HOST_OS_MACOS),y)")
+if start >= 0:
+    end = text.find("endif\n", start)
+    if end < 0:
+        raise SystemExit("lyaml macOS compatibility block ending not found")
+    text = text[:start] + text[end + len("endif\n"):]
+
+text = text.replace(
+    '\t$(if $(CONFIG_HOST_OS_MACOS),PATH=$(FAKEUNAME_PATH):$(TARGET_PATH_PKG)) \\\n',
+    "",
+)
+
+path.write_text(text)
+PY
+
+# OpenWrt 18.06 只有在 ./configure 可执行时才会真正运行 Build/Configure/Default。
 chmod +x feeds/PWpackages/shadowsocksr-libev/src/configure
 
 configure_naiveproxy
 
 
-section "Passwall and LuCI 18.06 compatibility"
+section "Passwall 与 LuCI 18.06 兼容"
 
-# Passwall UI/controller is pinned to the last revision verified on this 18.06
-# tree; proxy engines above continue to track current feeds.
-passwall_zip="dl/openwrt-passwall-${PASSWALL_COMMIT}.zip"
-passwall_tmp="$(mktemp -d)"
-download_cached \
-  "https://github.com/Openwrt-Passwall/openwrt-passwall/archive/${PASSWALL_COMMIT}.zip" \
-  "$passwall_zip"
-unzip -q "$passwall_zip" -d "$passwall_tmp"
+# Passwall UI 直接跟随 PWluci/main 当前版本。
+# 同时复制一份到 luci2，保持现有 LuCI 包布局和历史配置兼容。
+replace_dir feeds/PWluci/luci-app-passwall feeds/luci2/applications/luci-app-passwall
 
-passwall_src="${passwall_tmp}/openwrt-passwall-${PASSWALL_COMMIT}/luci-app-passwall"
-replace_dir "$passwall_src" feeds/luci2/applications/luci-app-passwall
-replace_dir "$passwall_src" feeds/PWluci/luci-app-passwall
-rm -rf "$passwall_tmp"
-
-# OpenWrt 18.06 is already a Lua-based LuCI tree. Modern compatibility bridge
-# packages (luci-compat/luci-lua-runtime/ucode) create invalid dependencies here.
+# OpenWrt 18.06 本身就是 Lua LuCI。
+# 新版 luci-compat / luci-lua-runtime / ucode 兼容桥会反向拉入 18.06 不具备的依赖，
+# 因此这里只去掉“现代 LuCI 兼容旧 Lua”的桥接层，不删除 Passwall 实际功能。
 for pw in \
   feeds/luci2/applications/luci-app-passwall/Makefile \
   feeds/PWluci/luci-app-passwall/Makefile; do
@@ -243,6 +265,9 @@ from pathlib import Path
 
 path = Path("feeds/luci2/luci.mk")
 text = path.read_text()
+
+# 新版 luci.mk 会给含 luasrc 的包自动追加 luci-lua-runtime。
+# 18.06 应继续使用自身原生 Lua LuCI，所以删除这一段自动依赖。
 block = """ifneq ($(wildcard ${CURDIR}/luasrc/*),)
  ifneq ($(filter-out luci-lib-base luci-lua-runtime,$(PKG_NAME)),)
   LUCI_DEPENDS += +luci-lua-runtime
@@ -252,6 +277,7 @@ endif
 """
 if block in text:
     text = text.replace(block, "", 1)
+
 path.write_text(text)
 PY
 
@@ -274,17 +300,17 @@ for symbol in \
 done
 
 
-section "Stable OpenWrt 18.06 compatibility packages"
+section "OpenWrt 18.06 稳定兼容包"
 
-# Modern miniupnpd-iptables/nftables variants conflict with the old Kconfig.
+# packages2 中现代 miniupnpd-iptables / nftables 变种会和 18.06 的旧 Kconfig 冲突。
 rm -rf \
   feeds/packages2/net/miniupnpd-iptables \
   feeds/packages2/net/miniupnpd-nftables \
   package/feeds/packages2/miniupnpd-iptables \
   package/feeds/packages2/miniupnpd-nftables
 
-# Keep the official OpenWrt 18.06 implementation and install it directly under
-# package/ so feed index regeneration is not required.
+# miniupnpd 固定使用 OpenWrt 18.06 官方实现，并直接放到 package/ 下，
+# 避免修改 feed 后还需要重新生成 feed 索引。
 miniupnpd_archive="dl/openwrt-packages-${MINIUPNPD_1806_COMMIT}.tar.gz"
 miniupnpd_tmp="$(mktemp -d)"
 download_cached \
@@ -302,14 +328,14 @@ replace_dir \
 rm -rf "$miniupnpd_tmp"
 
 
-section "Selected package refreshes"
+section "指定软件包更新"
 
 replace_dir feeds/packages2/devel/diffutils feeds/packages/devel/diffutils
 replace_dir feeds/packages2/utils/jq        feeds/packages/utils/jq
 replace_dir feeds/packages2/net/zerotier    feeds/gl_feed_common/zerotier
 replace_dir feeds/packages2/net/haproxy     feeds/gl_feed_1806/haproxy
 
-# HAProxy: use Lua 5.4 and disable QUIC on this old base.
+# HAProxy 使用 Lua 5.4；QUIC 与当前 18.06 底座不兼容，因此关闭。
 sed -i -E \
   -e 's/\+liblua5\.3/\+liblua5\.4/g' \
   -e 's/LUA_LIB_NAME="?lua5\.3"?/LUA_LIB_NAME="lua5.4"/g' \
@@ -317,15 +343,29 @@ sed -i -E \
   feeds/gl_feed_1806/haproxy/Makefile
 sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' feeds/gl_feed_1806/haproxy/Makefile
 
-# Modern Go toolchain required by current Xray.
+grep -q 'liblua5\.4' feeds/gl_feed_1806/haproxy/Makefile ||
+  die "HAProxy Lua 5.4 兼容修改未生效"
+if grep -Eq '^[[:space:]]*ADDON\+=USE_QUIC=1' feeds/gl_feed_1806/haproxy/Makefile; then
+  die "HAProxy QUIC 仍处于启用状态"
+fi
+
+# 当前 Xray 等现代代理核心需要较新的 Go 工具链。
 rm -rf feeds/gl_feed_common/golang
 git clone --depth=1 --branch "$GOLANG_BRANCH" \
   https://github.com/sbwml/packages_lang_golang \
   feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
+# Go 默认把 GOCACHE 放在 tmp/go-build，工作流结束后会丢失。
+# 改到仓库内固定目录，交给 Actions Cache 跨构建复用。
+sed -i 's|$(TMP_DIR)/go-build|$(TOPDIR)/.cache/go-build|g' \
+  feeds/gl_feed_common/golang/golang-values.mk
 
-section "Additional applications and build tools"
+grep -Fq '$(TOPDIR)/.cache/go-build' feeds/gl_feed_common/golang/golang-values.mk ||
+  die "Go GOCACHE 路径修改未生效"
+
+
+section "附加应用与构建工具"
 
 aliyun_tmp="$(mktemp -d)"
 git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git "$aliyun_tmp"
@@ -333,8 +373,7 @@ replace_dir "$aliyun_tmp/openwrt/aliyundrive-webdav" feeds/packages2/multimedia/
 replace_dir "$aliyun_tmp/openwrt/luci-app-aliyundrive-webdav" feeds/luci2/applications/luci-app-aliyundrive-webdav
 rm -rf "$aliyun_tmp"
 
-# We only need two directories from LEDE; sparse checkout avoids cloning the
-# entire repository history and working tree.
+# LEDE 这里只需要 ninja 和 adbyby 两个目录，使用 sparse checkout 避免拉完整工作树。
 lede_tmp="$(mktemp -d)"
 git clone --depth=1 --filter=blob:none --sparse https://github.com/coolsnowwolf/lede.git "$lede_tmp"
 git -C "$lede_tmp" sparse-checkout set tools/ninja package/lean/adbyby
@@ -346,29 +385,30 @@ rm -rf package/luci-app-adguardhome
 git clone --depth=1 https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app-adguardhome
 
 
-section "Board files and local compatibility libraries"
+section "板级文件与本地兼容库"
+
+# libs.zip 和 board 文件已经随当前 commit checkout 到 GITHUB_WORKSPACE。
+# 直接使用本地副本，确保本次构建与当前 commit 完全一致，也避免重复访问 GitHub Raw。
+[ -f "${GITHUB_WORKSPACE}/libs.zip" ] || die "找不到本地 libs.zip"
+[ -f "${GITHUB_WORKSPACE}/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe" ] ||
+  die "找不到本地 board-2.bin"
 
 rm -rf package/libs/openssl package/libs/ustream-ssl
-libs_tmp="$(mktemp)"
-curl -fL --retry 4 --retry-delay 2 \
-  "https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip" \
-  -o "$libs_tmp"
-unzip -oq "$libs_tmp"
-rm -f "$libs_tmp"
+unzip -oq "${GITHUB_WORKSPACE}/libs.zip"
 
-download_cached \
-  "https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe" \
+mkdir -p dl
+cp -f \
+  "${GITHUB_WORKSPACE}/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe" \
   "dl/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe"
 
 
-section "OpenWrt 18.06 CMake + ccache compatibility"
+section "OpenWrt 18.06 的 CMake 与 ccache 兼容"
 
-# OpenWrt 18.06 passes ccache itself as CMAKE_C_COMPILER and relies on
-# CMAKE_*_COMPILER_ARG1 for the real cross compiler. With the newer CMake
-# available on the current build host this breaks compiler checks (ccache sees
-# flags such as -pipe as its own arguments). Use CMake's compiler launcher
-# support instead: keep the real compiler in CMAKE_*_COMPILER and place ccache
-# in front of it with CMAKE_*_COMPILER_LAUNCHER.
+# OpenWrt 18.06 会把 ccache 本身当作 CMAKE_C_COMPILER，再通过
+# CMAKE_*_COMPILER_ARG1 传入真正的交叉编译器。当前较新的 CMake 在探测编译器时
+# 会丢掉 ARG1，导致 ccache 把 -pipe 等编译参数误当成自身参数。
+# 这里改用 CMake 原生 COMPILER_LAUNCHER：CMAKE_*_COMPILER 保留真实交叉编译器，
+# ccache 只作为前置 launcher，从而兼容现代 CMake。
 python3 - <<'PY'
 from pathlib import Path
 
@@ -448,39 +488,52 @@ path.write_text(text)
 PY
 
 
-section "Synchronize configuration"
+section "同步最终配置"
 
-# Reinstall the replaced package link and refresh package metadata after all
-# feed/package overrides.
+# 所有 feed / package 替换完成后，重新安装被替换包的链接并刷新包元数据。
 ./scripts/feeds install -f -p packages shadowsocks-libev
+./scripts/feeds install -f -p packages lyaml
 
-config_enable PACKAGE_shadowsocks-libev-config
-config_enable PACKAGE_miniupnpd
+# Passwall UI 追新后，部分旧版 UI 开关已经被上游取消。
+# 仍有明确用途且当前可维护的功能包独立保留。
+for symbol in \
+  PACKAGE_lyaml \
+  PACKAGE_coreutils-timeout \
+  PACKAGE_shadowsocks-libev-config \
+  PACKAGE_shadowsocks-libev-ss-local \
+  PACKAGE_shadowsocks-libev-ss-redir \
+  PACKAGE_trojan \
+  PACKAGE_miniupnpd; do
+  config_enable "$symbol"
+done
 
-# OpenWrt 18.06 has native ccache integration. Cache directories are persisted
-# by the GitHub Actions workflow.
+# OpenWrt 18.06 自带 ccache 支持，缓存目录由 GitHub Actions 跨构建保存。
 config_enable CCACHE
 
 rm -f tmp/.packageinfo tmp/.packagedeps tmp/.config-package.in
 make defconfig
 
 required_symbols=(
+  PACKAGE_luci-app-passwall
+  PACKAGE_lyaml
+  PACKAGE_coreutils-timeout
   PACKAGE_shadowsocks-libev-config
   PACKAGE_shadowsocks-libev-ss-local
   PACKAGE_shadowsocks-libev-ss-redir
+  PACKAGE_trojan
   PACKAGE_miniupnpd
   CCACHE
 )
 
 for symbol in "${required_symbols[@]}"; do
   grep -q "^CONFIG_${symbol}=y$" .config ||
-    die "Required config was not retained by defconfig: CONFIG_${symbol}=y"
+    die "make defconfig 后关键配置未保留：CONFIG_${symbol}=y"
 done
 
 if grep -Rqs '+luci-compat' \
   feeds/PWluci/luci-app-passwall/Makefile \
   feeds/luci2/applications/luci-app-passwall/Makefile; then
-  die "Passwall still depends on luci-compat"
+  die "Passwall 仍然依赖 luci-compat"
 fi
 
 for symbol in \
@@ -489,19 +542,22 @@ for symbol in \
   PACKAGE_luci-lib-base \
   PACKAGE_ucode-mod-lua; do
   if grep -Eq "^CONFIG_${symbol}=[ym]$" .config; then
-    die "Incompatible modern LuCI package was re-selected: CONFIG_${symbol}"
+    die "不兼容的现代 LuCI 包又被重新选中：CONFIG_${symbol}"
   fi
 done
 
-echo "Configuration checks passed; ccache enabled."
+echo "配置检查通过；ccache 已启用。"
 
 
-section "Host ncurses workaround"
+section "主机端 ncurses 兼容处理"
 
 if ! grep -q '^HOST_CFLAGS += -fPIC$' package/libs/ncurses/Makefile; then
   sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' \
     package/libs/ncurses/Makefile
 fi
+
+grep -q '^HOST_CFLAGS += -fPIC$' package/libs/ncurses/Makefile ||
+  die "ncurses Host PIC 兼容修改未生效"
 
 make package/ncurses/host/clean || true
 
@@ -513,9 +569,9 @@ fi
 hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
 export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
 
-# Persist the intended runtime library path into later GitHub Actions steps.
+# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
 if [ -n "${GITHUB_ENV:-}" ]; then
   echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 fi
 
-section "diy-part2 complete"
+section "diy-part2 执行完成"

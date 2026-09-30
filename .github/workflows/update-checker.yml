@@ -1,58 +1,108 @@
 #
-# Copyright (c) 2019-2021 P3TERX <https://p3terx.com>
-#
-# This is free software, licensed under the MIT License.
-# See /LICENSE for more information.
-#
-# https://github.com/P3TERX/Actions-OpenWrt
-# File: .github/workflows/update-checker.yml
-# Description: Source code update checker
+# SFT1200 上游更新检查
+# 监控 Passwall packages main 分支；发现新提交后触发主构建工作流。
 #
 
 name: Update Checker
 
-env:
-  REPO_URL: https://github.com/Openwrt-Passwall/openwrt-passwall-packages
-  REPO_BRANCH: main
-
 on:
   workflow_dispatch:
   schedule:
-    - cron: 40 */12 * * *
+    - cron: '40 */12 * * *'
+
+permissions:
+  actions: write
+  contents: write
+
+env:
+  PASSWALL_PACKAGES_REPO: https://github.com/Openwrt-Passwall/openwrt-passwall-packages
+  PASSWALL_UI_REPO: https://github.com/Openwrt-Passwall/openwrt-passwall
+  REPO_BRANCH: main
 
 jobs:
   check:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
+      - name: Get upstream commits
+        id: upstream
+        run: |
+          set -Eeuo pipefail
 
-    - name: Get Commit Hash
-      id: getHash
-      run: |
-        git clone --depth 1 $REPO_URL -b $REPO_BRANCH .
-        echo "::set-output name=commitHash::$(git rev-parse HEAD)"
+          packages_hash="$(
+            git ls-remote "$PASSWALL_PACKAGES_REPO" "refs/heads/$REPO_BRANCH" |
+            awk '{print $1}'
+          )"
+          ui_hash="$(
+            git ls-remote "$PASSWALL_UI_REPO" "refs/heads/$REPO_BRANCH" |
+            awk '{print $1}'
+          )"
 
-    - name: Compare Commit Hash
-      id: cacheHash
-      uses: actions/cache@v4.2.0
-      with:
-        path: .commitHash
-        key: HEAD-${{ steps.getHash.outputs.commitHash }}
+          [ -n "$packages_hash" ] && [ -n "$ui_hash" ]
+          combined_hash="$(printf '%s\n%s\n' "$packages_hash" "$ui_hash" | sha256sum | awk '{print $1}')"
 
-    - name: Save New Commit Hash
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      run: |
-        echo ${{ steps.getHash.outputs.commitHash }} | tee .commitHash
+          echo "combined_hash=$combined_hash" >> "$GITHUB_OUTPUT"
+          echo "Passwall packages HEAD: $packages_hash"
+          echo "Passwall UI HEAD:       $ui_hash"
+          echo "Combined fingerprint:   $combined_hash"
 
-    - name: Trigger build
-      if: steps.cacheHash.outputs.cache-hit != 'true'
-      uses: peter-evans/repository-dispatch@v1
-      with:
-        token: ${{ secrets.ACTIONS_TRIGGER_PAT }}
-        event-type: Source Code Update
+      - name: Check whether these commits were seen
+        id: upstream-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: .upstream-commit
+          key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
 
-    - name: Delete workflow runs
-      uses: GitRML/delete-workflow-runs@main
-      with:
-        retain_days: 1
-        keep_minimum_runs: 10 
+      - name: Record new upstream commit
+        if: steps.upstream-cache.outputs.cache-hit != 'true'
+        run: |
+          printf '%s\n' '${{ steps.upstream.outputs.combined_hash }}' > .upstream-commit
+
+      - name: Trigger OpenWrt build
+        id: trigger-build
+        if: steps.upstream-cache.outputs.cache-hit != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST \
+            "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type='Source Code Update' \
+            --silent
+
+      - name: Save upstream state
+        if: steps.upstream-cache.outputs.cache-hit != 'true' && steps.trigger-build.conclusion == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .upstream-commit
+          key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
+
+      - name: Clean old checker runs
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          cutoff_epoch="$(date -u -d '1 day ago' +%s)"
+
+          mapfile -t runs < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/update-checker.yml/runs?per_page=100" \
+              --jq '.workflow_runs[] | [.id, .created_at] | @tsv'
+          )
+
+          index=0
+          for row in "${runs[@]}"; do
+            index=$((index + 1))
+            [ "$index" -le 10 ] && continue
+
+            run_id="$(printf '%s\n' "$row" | cut -f1)"
+            created_at="$(printf '%s\n' "$row" | cut -f2)"
+            created_epoch="$(date -u -d "$created_at" +%s)"
+
+            if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
+              echo "Delete checker run ${run_id} (${created_at})"
+              gh api -X DELETE \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                --silent
+            fi
+          done
