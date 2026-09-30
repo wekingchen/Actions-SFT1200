@@ -74,42 +74,48 @@ jobs:
           diy2 = Path("diy-part2.sh").read_text()
           config = Path(".config").read_text()
 
+          # 只检查 build job 正文，避免 Preflight 自己的断言字符串造成自命中。
+          marker = "\n  build:\n"
+          if marker not in workflow:
+              raise SystemExit("PRECHECK ERROR: 找不到 build job")
+          build = workflow.split(marker, 1)[1]
+
           def require(condition, message):
               if not condition:
                   raise SystemExit(f"PRECHECK ERROR: {message}")
 
           # setup.py 内部会创建 Git 提交，身份必须在调用前设置。
-          setup_pos = workflow.find("python3 setup.py")
-          name_pos = workflow.find('export GIT_AUTHOR_NAME="GitHub Actions"')
-          email_pos = workflow.find('export GIT_AUTHOR_EMAIL=')
+          setup_pos = build.find("python3 setup.py")
+          name_pos = build.find('export GIT_AUTHOR_NAME="GitHub Actions"')
+          email_pos = build.find('export GIT_AUTHOR_EMAIL=')
           require(setup_pos >= 0, "找不到 setup.py 调用")
           require(0 <= name_pos < setup_pos, "Git author name 没有在 setup.py 前设置")
           require(0 <= email_pos < setup_pos, "Git author email 没有在 setup.py 前设置")
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
-          require("actions/cache/restore@v6" in workflow, "缺少 cache restore")
-          require("actions/cache/save@v6" in workflow, "缺少 cache save")
-          require("uses: actions/cache@v6" not in workflow, "仍存在旧的一体式 cache action")
+          require("actions/cache/restore@v6" in build, "缺少 cache restore")
+          require("actions/cache/save@v6" in build, "缺少 cache save")
+          require("uses: actions/cache@v6" not in build, "仍存在旧的一体式 cache action")
 
           # 固件分发必须经过 manifest 验收。
           require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR" in workflow,
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR" in build,
               "bin Artifact 未受 manifest 验收控制",
           )
           require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE" in workflow,
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE" in build,
               "Release tag 未受 manifest 验收控制",
           )
           require(
               "steps.manifest.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
-              in workflow,
+              in build,
               "Release 上传未受 manifest 验收控制",
           )
 
           # manifest 只能验证 SFT1200 image manifest，不能误取 Packages.manifest。
-          require("profile_sanitized" in workflow, "manifest 未按 SFT1200 profile 精确匹配")
-          require("! -name 'Packages.manifest'" in workflow, "manifest 未排除 Packages.manifest")
-          require('awk \'NF >= 3 && $2 == "-" {print $1}\'' in workflow,
+          require("profile_sanitized" in build, "manifest 未按 SFT1200 profile 精确匹配")
+          require("! -name 'Packages.manifest'" in build, "manifest 未排除 Packages.manifest")
+          require('awk \'NF >= 3 && $2 == "-" {print $1}\'' in build,
                   "manifest 解析格式与 Siflower 18.06 opkg list-installed 不一致")
 
           # 已明确弃用的 trojan-plus 不应再被配置或强制保留。
