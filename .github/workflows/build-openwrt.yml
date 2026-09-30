@@ -169,13 +169,40 @@ jobs:
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
     - name: Load custom configuration
+      id: custom-config
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
         chmod +x $DIY_P2_SH
         bash -n "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        $GITHUB_WORKSPACE/$DIY_P2_SH
+
+        set +e
+        "$GITHUB_WORKSPACE/$DIY_P2_SH" > diy-part2.log 2>&1
+        config_status=$?
+        set -e
+
+        if [ "$config_status" -ne 0 ]; then
+          echo "::group::diy-part2 配置阶段错误摘要"
+          grep -nE '(ERROR:|error:|Error [0-9]+|not found|not retained|dependency|recursive dependency|Traceback|SystemExit)' diy-part2.log | tail -n 200 || true
+          echo
+          echo "diy-part2.log 最后 300 行："
+          tail -n 300 diy-part2.log || true
+          echo "::endgroup::"
+          exit "$config_status"
+        fi
+
+        tail -n 80 diy-part2.log || true
+
+    - name: Upload configuration diagnostics
+      uses: actions/upload-artifact@v7
+      if: failure() && steps.custom-config.conclusion == 'failure'
+      with:
+        name: OpenWrt_config_diagnostics_${{ github.run_number }}
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/diy-part2.log
+        if-no-files-found: ignore
+        retention-days: 14
 
     - name: Compute compiler cache fingerprint
       id: build-cache
