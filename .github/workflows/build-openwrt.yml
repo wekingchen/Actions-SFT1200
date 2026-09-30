@@ -370,7 +370,8 @@ jobs:
             index=$((index + 1))
             [ "$index" -le 10 ] && continue
 
-            IFS="$(printf '\\t')" read -r run_id created_at <<< "$row"
+            run_id="$(printf '%s\n' "$row" | cut -f1)"
+            created_at="$(printf '%s\n' "$row" | cut -f2)"
             created_epoch="$(date -u -d "$created_at" +%s)"
 
             if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
@@ -402,7 +403,9 @@ jobs:
           index=$((index + 1))
           [ "$index" -le 10 ] && continue
 
-          IFS="$(printf '\\t')" read -r created_at release_id tag_name <<< "$row"
+          created_at="$(printf '%s\n' "$row" | cut -f1)"
+          release_id="$(printf '%s\n' "$row" | cut -f2)"
+          tag_name="$(printf '%s\n' "$row" | cut -f3-)"
           echo "Delete release ${tag_name} (${created_at})"
 
           gh api -X DELETE \
