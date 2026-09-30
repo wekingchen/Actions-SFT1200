@@ -38,7 +38,8 @@
 - 精简的控制台编译输出
 - 编译失败时自动上传完整诊断日志
 - 固件 manifest 功能完整性检查
-- 编译成功后上传 `bin` Artifact 与 Release
+- 成功构建自动生成最终配置留档，并上传 `config-record` Artifact
+- 编译成功后上传 `bin` Artifact 与 Release；Release 同时附带配置留档
 - 自动清理旧 Workflow Runs 和旧 Releases
 
 ### Update Checker
@@ -47,16 +48,60 @@
 
 - `Openwrt-Passwall/openwrt-passwall-packages:main`
 - `Openwrt-Passwall/openwrt-passwall:main`
+- `fw876/helloworld:master`
 
 任一仓库出现新提交时，通过 GitHub 原生 `repository_dispatch` 触发一次固件构建。
 
+## 构建配置留档机制
+
+仓库根目录的 `.config` 是**长期维护基线**，代表我们主动选择并希望长期保留的功能配置。CI 不会在编译成功后自动把最终 `.config` 回写仓库，避免把上游 Kconfig 的临时默认变化、依赖自动展开或无意义排序变化永久固化。
+
+每次构建通过 `make` 和最终 firmware manifest 验收后，工作流会自动调用 `scripts/archive-config.sh` 生成 `config-record`，并同时：
+
+- 上传为本次 Actions 的 `OpenWrt_config_record...` Artifact。
+- 附加到本次 GitHub Release，便于以后从最近保留的 Release 直接追溯构建配置。
+- 在 Actions `Step summary` 中显示最终 `.config` SHA256、变化数量，以及差异前 80 行。
+
+`config-record` 中包含：
+
+- `repository.config`：本次构建开始时仓库中的 `.config` 基线。
+- `final.config`：经过 `diy-part2.sh`、`make defconfig` 后，本次固件真正使用的最终 `.config`。
+- `diffconfig.txt`：OpenWrt `scripts/diffconfig.sh` 的输出，只保留相对默认配置真正有意义的选项；人工复核和迁移时优先看它。
+- `config-changes.diff`：按 `CONFIG_*` symbol 比较 `repository.config` 与 `final.config` 的语义差异，忽略纯排序变化。
+- `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、build cache 指纹和最终 `.config` SHA256。
+- `README.txt`：Artifact 内置使用说明；即使以后只下载到这一份留档，也能知道每个文件的用途。
+
+### 什么时候需要更新仓库 `.config`
+
+正常情况下**不需要**因为一次成功构建就更新仓库 `.config`。只有当 `config-changes.diff` 显示的变化是我们明确希望长期保留的配置策略变化时，才建议提升新的基线：
+
+1. 先查看 `config-changes.diff`，确认新增、删除或改变的配置项都是预期变化。
+2. 再查看 `diffconfig.txt`，确认 Passwall、SSR Plus、Xray、Hysteria、NaiveProxy 等关键功能选择仍然正确。
+3. 确认无误后，将 `final.config` 复制为仓库根目录 `.config`。
+4. 提交 `.config`，并让下一次正式构建重新经过 Preflight、Compile 和 manifest 验收。
+
+不要把 `final.config` 自动回写仓库；成功只说明这一组配置可以构建并通过当前验收，不代表所有由上游自动引入的 Kconfig 变化都应该成为长期维护策略。
+
+### 手工编译时使用同一机制
+
+本地或 SSH 调试完成后也可以生成与 CI 完全相同的留档：
+
+```bash
+scripts/archive-config.sh \
+  /path/to/Actions-SFT1200/.config \
+  /path/to/openwrt/.config \
+  /path/to/config-record
+```
+
+第一个参数必须是**仓库基线 `.config`**，第二个参数是经过兼容脚本和 `make defconfig` 后的**最终 `.config`**。
 ## 关键文件
 
 - `.config`：当前 SFT1200 固件功能配置。
 - `diy-part1.sh`：feeds 更新前处理。
 - `diy-part2.sh`：主要兼容层和软件包替换逻辑。
 - `.github/workflows/build-openwrt.yml`：主编译工作流。
-- `.github/workflows/update-checker.yml`：Passwall 上游更新监控。
+- `.github/workflows/update-checker.yml`：Passwall 与 helloworld 上游更新监控。
+- `scripts/archive-config.sh`：成功构建的最终配置留档与差异生成工具。
 - `libs.zip`：本仓库维护的 OpenSSL / ustream 兼容文件。
 - `board-2.bin.*`：SFT1200 板级文件。
 
