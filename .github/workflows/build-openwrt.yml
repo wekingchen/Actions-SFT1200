@@ -11,6 +11,9 @@
 name: SFT1200 固件编译
 
 on:
+  push:
+    branches:
+      - main
   repository_dispatch:
   workflow_dispatch:
     inputs:
