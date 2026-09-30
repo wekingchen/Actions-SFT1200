@@ -40,7 +40,7 @@
 - 固件 manifest 功能完整性检查
 - 成功构建自动生成最终配置留档，并上传 `config-record` Artifact
 - 编译成功后上传 `bin` Artifact 与 Release；Release 同时附带配置留档
-- 自动清理旧 Workflow Runs 和旧 Releases
+- 自动清理旧 Workflow Runs；只有本轮固件成功发布 Release 后，才清理旧 Releases 并保留最近 10 个，失败构建不会占用或挤掉 Release 位置。
 
 ### Update Checker
 
