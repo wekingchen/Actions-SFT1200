@@ -395,10 +395,17 @@ jobs:
           while kill -0 "$build_pid" 2>/dev/null; do
             sleep 300
             kill -0 "$build_pid" 2>/dev/null || break
-            printf '[编译心跳] %s | build.log=%s | ' \
+
+            log_size="$(du -h build.log 2>/dev/null | awk '{print $1}')"
+            log_mtime="$(stat -c '%y' build.log 2>/dev/null | cut -d'.' -f1)"
+            last_line="$(tail -n 1 build.log 2>/dev/null | tr '\n\r' '  ')"
+
+            printf '[编译心跳] %s | PID=%s alive | build.log=%s | mtime=%s | %s\n' \
               "$(date '+%Y-%m-%d %H:%M:%S')" \
-              "$(du -h build.log 2>/dev/null | awk '{print $1}')"
-            tail -n 1 build.log 2>/dev/null || true
+              "$build_pid" \
+              "${log_size:-0}" \
+              "${log_mtime:-unknown}" \
+              "${last_line:-暂无新日志}"
           done
         ) &
         heartbeat_pid=$!
