@@ -44,6 +44,13 @@ cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwal
 cp -r openwrt-passwall-af831669039648788499961dd088cfad53eca1ae/luci-app-passwall feeds/PWluci/
 rm -rf openwrt-passwall.zip openwrt-passwall-af831669039648788499961dd088cfad53eca1ae
 
+# Passwall 同时存在 luci2 / PWluci 两个副本；18.06 不需要现代 luci-compat。
+for pw in \
+  feeds/luci2/applications/luci-app-passwall/Makefile \
+  feeds/PWluci/luci-app-passwall/Makefile; do
+  sed -i 's/+luci-compat//g' "$pw"
+done
+
 # OpenWrt 18.06 原生就是 Lua LuCI；luci2 中的现代兼容层会反向拉入 ucode。
 # 对 18.06 来说，这些只是“新 LuCI 兼容旧 Lua”的桥接包，不是实际功能本体。
 # 为避免 make defconfig 再次把它们选回来，既清理依赖，也移除对应现代包入口。
@@ -92,12 +99,16 @@ rm -rf feeds/packages2/net/miniupnpd-iptables feeds/packages2/net/miniupnpd-nfta
 rm -rf package/feeds/packages2/miniupnpd-iptables package/feeds/packages2/miniupnpd-nftables
 
 # 用 OpenWrt 18.06 官方 miniupnpd 做稳定兜底，保留 UPnP/NAT-PMP/PCP 功能。
+# 直接放入 package/，避免修改 feed 后索引未刷新导致包符号无法被 defconfig 识别。
 MINIUPNPD_1806_COMMIT=0171d18e051a0afdc5bc52b9e7913518b2e2a2a0
 rm -rf /tmp/packages-18.06.tar.gz "/tmp/packages-${MINIUPNPD_1806_COMMIT}"
 wget -q "https://github.com/openwrt/packages/archive/${MINIUPNPD_1806_COMMIT}.tar.gz" -O /tmp/packages-18.06.tar.gz
 tar -xzf /tmp/packages-18.06.tar.gz -C /tmp
-rm -rf feeds/gl_feed_common/miniupnpd
-cp -a "/tmp/packages-${MINIUPNPD_1806_COMMIT}/net/miniupnpd" feeds/gl_feed_common/
+rm -rf \
+  feeds/gl_feed_common/miniupnpd \
+  package/feeds/gl_feed_common/miniupnpd \
+  package/miniupnpd
+cp -a "/tmp/packages-${MINIUPNPD_1806_COMMIT}/net/miniupnpd" package/miniupnpd
 rm -rf /tmp/packages-18.06.tar.gz "/tmp/packages-${MINIUPNPD_1806_COMMIT}"
 
 # naiveproxy: GL-SFT1200 的 ARCH_PACKAGES=mips_siflower，上游没有这个预编译名。
@@ -185,17 +196,53 @@ wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9ef
 # diy-part2 修改了 feed 包内容和依赖关系，必须重新刷新 feed 链接与 Kconfig。
 # 否则 .config 会保持旧依赖图，出现源码已在但 IPK 未被纳入构建的情况。
 ./scripts/feeds install -f -p packages shadowsocks-libev
-./scripts/feeds install -f -p gl_feed_common miniupnpd
 
 for sym in shadowsocks-libev-config miniupnpd; do
   sed -i "/^CONFIG_PACKAGE_${sym}=y$/d; /^# CONFIG_PACKAGE_${sym} is not set$/d" .config
   echo "CONFIG_PACKAGE_${sym}=y" >> .config
 done
 
+# package/install 读取的是已生成的 package metadata；强制刷新一次。
+rm -f tmp/.packageinfo tmp/.packagedeps tmp/.config-package.in
 make defconfig
 
 echo "=== SFT1200 dependency sync check ==="
 grep -E "CONFIG_PACKAGE_(shadowsocks-libev-config|shadowsocks-libev-ss-local|shadowsocks-libev-ss-redir|miniupnpd)=[ym]" .config || true
+if ! grep -q '^CONFIG_PACKAGE_miniupnpd=y
+bad_luci=0
+for sym in luci-compat luci-lua-runtime luci-lib-base ucode-mod-lua; do
+  if grep -Eq "CONFIG_PACKAGE_${sym}=[ym]" .config; then
+    echo "ERROR: incompatible package was re-selected: ${sym}"
+    bad_luci=1
+  fi
+done
+if [ "$bad_luci" -ne 0 ]; then
+  exit 1
+fi
+echo "===================================="
+
+# 修复 host ncurses 静态库 relocation 错误
+sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' package/libs/ncurses/Makefile
+
+# 清理老的 hostpkg ncurses —— 用内置目标更安全，且不存在也不会失败
+make package/ncurses/host/clean || true
+
+# 强制只用动态库 —— 目录不存在时直接跳过，避免 find 报错
+if [ -d staging_dir/hostpkg/lib ]; then
+  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
+  find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
+fi
+
+# 运行时库搜索路径（LD_LIBRARY_PATH 可能为空，给默认值）
+export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:${LD_LIBRARY_PATH:-}"
+ .config; then
+  echo "ERROR: miniupnpd was not retained by defconfig"
+  exit 1
+fi
+if grep -Rqs '+luci-compat' feeds/PWluci/luci-app-passwall/Makefile feeds/luci2/applications/luci-app-passwall/Makefile; then
+  echo "ERROR: Passwall still depends on luci-compat"
+  exit 1
+fi
 
 echo "=== incompatible modern LuCI packages ==="
 bad_luci=0
