@@ -1,6 +1,6 @@
 #
 # SFT1200 上游更新检查
-# 监控 Passwall packages main 分支；发现新提交后触发主构建工作流。
+# 监控 Passwall packages/UI 与 helloworld；发现新提交后触发主构建工作流。
 #
 
 name: Update Checker
@@ -17,7 +17,9 @@ permissions:
 env:
   PASSWALL_PACKAGES_REPO: https://github.com/Openwrt-Passwall/openwrt-passwall-packages
   PASSWALL_UI_REPO: https://github.com/Openwrt-Passwall/openwrt-passwall
-  REPO_BRANCH: main
+  HELLOWORLD_REPO: https://github.com/fw876/helloworld
+  PASSWALL_BRANCH: main
+  HELLOWORLD_BRANCH: master
 
 jobs:
   check:
@@ -30,20 +32,29 @@ jobs:
           set -Eeuo pipefail
 
           packages_hash="$(
-            git ls-remote "$PASSWALL_PACKAGES_REPO" "refs/heads/$REPO_BRANCH" |
+            git ls-remote "$PASSWALL_PACKAGES_REPO" "refs/heads/$PASSWALL_BRANCH" |
             awk '{print $1}'
           )"
           ui_hash="$(
-            git ls-remote "$PASSWALL_UI_REPO" "refs/heads/$REPO_BRANCH" |
+            git ls-remote "$PASSWALL_UI_REPO" "refs/heads/$PASSWALL_BRANCH" |
+            awk '{print $1}'
+          )"
+          helloworld_hash="$(
+            git ls-remote "$HELLOWORLD_REPO" "refs/heads/$HELLOWORLD_BRANCH" |
             awk '{print $1}'
           )"
 
-          [ -n "$packages_hash" ] && [ -n "$ui_hash" ]
-          combined_hash="$(printf '%s\n%s\n' "$packages_hash" "$ui_hash" | sha256sum | awk '{print $1}')"
+          [ -n "$packages_hash" ] && [ -n "$ui_hash" ] && [ -n "$helloworld_hash" ]
+          combined_hash="$(
+            printf '%s\n%s\n%s\n' "$packages_hash" "$ui_hash" "$helloworld_hash" |
+            sha256sum |
+            awk '{print $1}'
+          )"
 
           echo "combined_hash=$combined_hash" >> "$GITHUB_OUTPUT"
           echo "Passwall packages HEAD: $packages_hash"
           echo "Passwall UI HEAD:       $ui_hash"
+          echo "helloworld HEAD:        $helloworld_hash"
           echo "Combined fingerprint:   $combined_hash"
 
       - name: Check whether these commits were seen
@@ -51,7 +62,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: .upstream-commit
-          key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
+          key: proxy-upstream-${{ steps.upstream.outputs.combined_hash }}
 
       - name: Record new upstream commit
         if: steps.upstream-cache.outputs.cache-hit != 'true'
@@ -74,7 +85,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: .upstream-commit
-          key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
+          key: proxy-upstream-${{ steps.upstream.outputs.combined_hash }}
 
       - name: Clean old checker runs
         if: always() && !cancelled()
