@@ -48,7 +48,7 @@ jobs:
 
       - name: Check whether these commits were seen
         id: upstream-cache
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: .upstream-commit
           key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
@@ -59,6 +59,7 @@ jobs:
           printf '%s\n' '${{ steps.upstream.outputs.combined_hash }}' > .upstream-commit
 
       - name: Trigger OpenWrt build
+        id: trigger-build
         if: steps.upstream-cache.outputs.cache-hit != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,6 +68,13 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/dispatches" \
             -f event_type='Source Code Update' \
             --silent
+
+      - name: Save upstream state
+        if: steps.upstream-cache.outputs.cache-hit != 'true' && steps.trigger-build.conclusion == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: .upstream-commit
+          key: passwall-upstream-${{ steps.upstream.outputs.combined_hash }}
 
       - name: Clean old checker runs
         if: always() && !cancelled()
