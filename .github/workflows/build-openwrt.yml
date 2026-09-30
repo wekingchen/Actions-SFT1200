@@ -26,6 +26,10 @@ permissions:
   actions: write
   contents: write
 
+concurrency:
+  group: sft1200-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REPO_URL: https://github.com/201821143044/gl-infra-builder-new
   REPO_BRANCH: main
@@ -49,6 +53,24 @@ jobs:
     runs-on: ubuntu-22.04
 
     steps:
+    - name: Cancel older optimization test runs
+      if: github.ref_name == 'test/optimization-20260930'
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -Eeuo pipefail
+        gh api --paginate \
+          "repos/${GITHUB_REPOSITORY}/actions/workflows/build-openwrt.yml/runs?branch=test%2Foptimization-20260930&status=in_progress&per_page=100" \
+          --jq '.workflow_runs[].id' |
+        while read -r run_id; do
+          [ -n "$run_id" ] || continue
+          [ "$run_id" = "$GITHUB_RUN_ID" ] && continue
+          echo "Cancel old test run: $run_id"
+          gh api -X POST \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" \
+            --silent || true
+        done
+
     - name: Before freeing up disk space
       run: |
         echo "Before freeing up disk space"
@@ -159,7 +181,7 @@ jobs:
 
     - name: Restore source download cache
       id: dl-cache
-      uses: actions/cache@v6
+      uses: actions/cache/restore@v6
       with:
         path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
         key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
@@ -209,15 +231,18 @@ jobs:
       id: build-cache
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        go_head="$(git -C feeds/gl_feed_common/golang rev-parse HEAD)"
         {
           sha256sum .config
           sha256sum "$GITHUB_WORKSPACE/$DIY_P2_SH"
           printf 'feeds=%s\n' "${{ steps.feed-cache.outputs.hash }}"
+          printf 'go=%s\n' "$go_head"
         } | sha256sum | awk '{print "hash="$1}' >> "$GITHUB_OUTPUT"
+        echo "Go toolchain HEAD: $go_head"
 
     - name: Restore compiler cache
       id: build-cache-restore
-      uses: actions/cache@v6
+      uses: actions/cache/restore@v6
       with:
         path: |
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
@@ -320,8 +345,16 @@ jobs:
         fi
 
         echo "status=success" >> $GITHUB_OUTPUT
-        grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
-        [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
+        profile="$(
+          sed -n 's/^CONFIG_TARGET_siflower_sf19a28_fullmask_\(.*\)=y$/\1/p' .config |
+          head -n1
+        )"
+        [ -n "$profile" ] || {
+          echo "ERROR: 无法从 .config 识别 SFT1200 profile" >&2
+          exit 1
+        }
+        printf '%s\n' "$profile" > DEVICE_NAME
+        echo "DEVICE_NAME=_$profile" >> "$GITHUB_ENV"
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Save compiler cache
@@ -340,6 +373,46 @@ jobs:
       run: |
         set -Eeuo pipefail
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+
+        profile="$(
+          sed -n 's/^CONFIG_TARGET_siflower_sf19a28_fullmask_\(.*\)=y$/\1/p' .config |
+          head -n1
+        )"
+        [ -n "$profile" ] || {
+          echo "ERROR: 无法从 .config 识别 SFT1200 profile"
+          exit 1
+        }
+
+        mapfile -t manifests < <(
+          find bin/targets/siflower -type f \
+            -name "*-${profile}.manifest" \
+            ! -name 'Packages.manifest' \
+            -size +0c -print |
+          sort
+        )
+
+        if [ "${#manifests[@]}" -ne 1 ]; then
+          echo "ERROR: SFT1200 应只对应 1 份 image manifest，实际找到 ${#manifests[@]} 份"
+          echo "当前所有 manifest："
+          find bin/targets/siflower -type f -name '*.manifest' -print | sort || true
+          exit 1
+        fi
+
+        manifest="${manifests[0]}"
+        echo "SFT1200 profile：$profile"
+        echo "固件 manifest：$manifest"
+        echo "manifest 前 20 行："
+        head -n 20 "$manifest" || true
+
+        # Siflower 18.06 的 Image/Manifest 明确来自 opkg list-installed，
+        # 格式固定为：package-name - version。
+        awk 'NF >= 3 && $2 == "-" {print $1}' "$manifest" |
+          sort -u > /tmp/sft1200-installed-packages.txt
+
+        [ -s /tmp/sft1200-installed-packages.txt ] || {
+          echo "ERROR: image manifest 解析后没有任何已安装包"
+          exit 1
+        }
 
         required_packages=(
           luci-app-passwall
@@ -361,66 +434,9 @@ jobs:
           luci-app-aliyundrive-webdav
         )
 
-        mapfile -t manifests < <(
-          find bin/targets/siflower -type f -name '*.manifest' -size +0c -print | sort
-        )
-
-        if [ "${#manifests[@]}" -eq 0 ]; then
-          echo "ERROR: 未找到固件 manifest"
-          exit 1
-        fi
-
-        echo "发现 ${#manifests[@]} 份 manifest："
-        printf '  %s\n' "${manifests[@]}"
-
-        best_manifest=""
-        best_packages=""
-        best_matches=-1
-
-        for manifest in "${manifests[@]}"; do
-          pkg_list="$(mktemp)"
-
-          # Siflower 18.06 正常格式来自 opkg list-installed：
-          #   package-name - version
-          # 同时兼容部分工具可能生成的 control 格式：
-          #   Package: package-name
-          awk '
-            /^Package:[[:space:]]+/ {
-              print $2
-              next
-            }
-            NF >= 3 && $2 == "-" {
-              print $1
-              next
-            }
-          ' "$manifest" | sort -u > "$pkg_list"
-
-          matches=0
-          for pkg in "${required_packages[@]}"; do
-            if grep -Fxq "$pkg" "$pkg_list"; then
-              matches=$((matches + 1))
-            fi
-          done
-
-          printf 'manifest 候选：%s -> 命中 %d/%d 个关键包\n' \
-            "$manifest" "$matches" "${#required_packages[@]}"
-
-          if [ "$matches" -gt "$best_matches" ]; then
-            [ -z "$best_packages" ] || rm -f "$best_packages"
-            best_manifest="$manifest"
-            best_packages="$pkg_list"
-            best_matches="$matches"
-          else
-            rm -f "$pkg_list"
-          fi
-        done
-
-        echo "选用 manifest：$best_manifest"
-        echo "关键包命中：$best_matches/${#required_packages[@]}"
-
         missing=0
         for pkg in "${required_packages[@]}"; do
-          if grep -Fxq "$pkg" "$best_packages"; then
+          if grep -Fxq "$pkg" /tmp/sft1200-installed-packages.txt; then
             printf 'OK   %s\n' "$pkg"
           else
             printf 'MISS %s\n' "$pkg"
@@ -429,18 +445,21 @@ jobs:
         done
 
         if [ "$missing" -ne 0 ]; then
-          echo
-          echo "选中 manifest 的前 40 行："
-          head -n 40 "$best_manifest" || true
-          echo
-          echo "ERROR: 编译成功，但关键功能包没有全部进入同一份最终固件 manifest。"
-          rm -f "$best_packages"
+          echo "ERROR: 编译成功，但关键功能包没有全部进入 SFT1200 最终固件。"
           exit 1
         fi
 
-        rm -f "$best_packages"
-        echo "固件功能完整性检查通过：$best_manifest"
+        echo "固件功能完整性检查通过：$manifest"
         echo "status=success" >> "$GITHUB_OUTPUT"
+
+    - name: Upload manifest diagnostics
+      uses: actions/upload-artifact@v7
+      if: failure() && steps.compile.outputs.status == 'success' && steps.manifest.conclusion == 'failure'
+      with:
+        name: OpenWrt_manifest_diagnostics_${{ github.run_number }}
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/**/*.manifest
+        if-no-files-found: ignore
+        retention-days: 14
 
     - name: Upload build diagnostics
       uses: actions/upload-artifact@v7
@@ -460,7 +479,7 @@ jobs:
 
     - name: Upload bin directory
       uses: actions/upload-artifact@v7
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      if: always() && steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
       with:
         name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
         path: openwrt/openwrt-18.06/siflower/openwrt-18.06/bin
