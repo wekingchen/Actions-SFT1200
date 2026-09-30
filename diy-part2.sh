@@ -13,6 +13,7 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 readonly MINIUPNPD_1806_COMMIT="0171d18e051a0afdc5bc52b9e7913518b2e2a2a0"
+readonly TROJAN_PLUS_COMMIT="51dc9009a90909e58c7915f1fa8d0fe9fce1a1c0"
 readonly GOLANG_BRANCH="27.x"
 readonly NAIVEPROXY_ARCH="mipsel_24kc-static"
 
@@ -295,6 +296,28 @@ for symbol in \
   PACKAGE_ucode-mod-lua; do
   config_disable "$symbol"
 done
+
+
+section "上游已下架代理组件兼容"
+
+# Passwall 于 2026-05 移除了 Trojan-Plus UI 入口，PWpackages 又在 2026-06
+# 删除了 trojan-plus 软件包。为了保持现有固件功能，这里单独固定到删除前
+# 最后一个可用的 PWpackages commit；其它 Passwall / 代理组件仍继续追新。
+trojan_plus_archive="dl/openwrt-passwall-packages-${TROJAN_PLUS_COMMIT}.tar.gz"
+trojan_plus_tmp="$(mktemp -d)"
+
+download_cached \
+  "https://github.com/Openwrt-Passwall/openwrt-passwall-packages/archive/${TROJAN_PLUS_COMMIT}.tar.gz" \
+  "$trojan_plus_archive"
+
+tar -xzf "$trojan_plus_archive" -C "$trojan_plus_tmp"
+
+rm -rf package/trojan-plus
+replace_dir \
+  "${trojan_plus_tmp}/openwrt-passwall-packages-${TROJAN_PLUS_COMMIT}/trojan-plus" \
+  package/trojan-plus
+
+rm -rf "$trojan_plus_tmp"
 
 
 section "OpenWrt 18.06 稳定兼容包"
