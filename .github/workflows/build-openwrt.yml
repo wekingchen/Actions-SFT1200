@@ -35,6 +35,10 @@ env:
   UPLOAD_WETRANSFER: false
   UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
+  # OpenWrt 18.06 ccache settings. "content" avoids misses when the rebuilt
+  # compiler has identical bytes but a different timestamp.
+  CCACHE_COMPILERCHECK: content
+  CCACHE_MAXSIZE: 512M
 
 jobs:
   build:
@@ -108,7 +112,7 @@ jobs:
       working-directory: ./
       run: |
         df -hT $PWD
-        git clone $REPO_URL -b $REPO_BRANCH openwrt
+        git clone --depth=1 -b $REPO_BRANCH $REPO_URL openwrt
         ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
         git config --global user.email "you@example.com"
@@ -135,6 +139,28 @@ jobs:
     - name: Update feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
 
+    - name: Compute feed cache fingerprint
+      id: feed-cache
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        {
+          for feed in feeds/*; do
+            [ -d "$feed" ] || continue
+            if git -C "$feed" rev-parse HEAD >/dev/null 2>&1; then
+              printf '%s=%s\n' "$(basename "$feed")" "$(git -C "$feed" rev-parse HEAD)"
+            fi
+          done
+        } | sort | tee /tmp/sft1200-feed-commits.txt
+        echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+    - name: Restore source download cache
+      uses: actions/cache@v4
+      with:
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
+        key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
+        restore-keys: |
+          sft1200-dl-${{ runner.os }}-
+
     - name: Install feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
 
@@ -143,8 +169,32 @@ jobs:
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
         [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
         chmod +x $DIY_P2_SH
+        bash -n "$GITHUB_WORKSPACE/$DIY_P2_SH"
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
         $GITHUB_WORKSPACE/$DIY_P2_SH
+
+    - name: Compute compiler cache fingerprint
+      id: build-cache
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        {
+          sha256sum .config
+          sha256sum "$GITHUB_WORKSPACE/$DIY_P2_SH"
+          printf 'feeds=%s\n' "${{ steps.feed-cache.outputs.hash }}"
+        } | sha256sum | awk '{print "hash="$1}' >> "$GITHUB_OUTPUT"
+
+    - name: Restore compiler cache
+      uses: actions/cache@v4
+      with:
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
+        # Unique per run so the warmed cache is saved again after a successful
+        # build; restore-keys always selects the newest compatible cache first.
+        key: sft1200-ccache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}-${{ github.run_number }}
+        restore-keys: |
+          sft1200-ccache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}-
+          sft1200-ccache-${{ runner.os }}-
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -163,9 +213,21 @@ jobs:
       id: compile
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"    
+        echo -e "$(nproc) thread compile"
+        echo "Restored ccache directories:"
+        du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
+
         make -j$(nproc) V=s
-        # make -j1 V=s
+
+        if [ -x staging_dir/host/bin/ccache ]; then
+          echo "=== ccache statistics ==="
+          for cache_dir in staging_dir/host/ccache staging_dir/target-*/ccache; do
+            [ -d "$cache_dir" ] || continue
+            echo "--- $cache_dir ---"
+            CCACHE_DIR="$cache_dir" staging_dir/host/bin/ccache -s || true
+          done
+        fi
+
         echo "status=success" >> $GITHUB_OUTPUT
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
