@@ -178,7 +178,7 @@ PY
 }
 
 
-section "Proxy packages"
+section "代理组件"
 
 # 代理核心优先使用 Passwall / helloworld 当前版本，覆盖 packages2 中可能较旧的副本。
 for pkg in xray-core v2ray-geodata sing-box chinadns-ng dns2socks dns2tcp microsocks; do
@@ -210,10 +210,13 @@ from pathlib import Path
 path = Path("feeds/packages/lang/lyaml/Makefile")
 text = path.read_text()
 
-text = text.replace(
-    "PKG_BUILD_DEPENDS:=lua/host luarocks/host HOST_OS_MACOS:fakeuname/host",
-    "PKG_BUILD_DEPENDS:=lua/host luarocks/host",
-)
+old_dep = "PKG_BUILD_DEPENDS:=lua/host luarocks/host HOST_OS_MACOS:fakeuname/host"
+new_dep = "PKG_BUILD_DEPENDS:=lua/host luarocks/host"
+
+if old_dep in text:
+    text = text.replace(old_dep, new_dep, 1)
+elif new_dep not in text:
+    raise SystemExit("lyaml host build dependency block not found")
 
 start = text.find("ifeq ($(CONFIG_HOST_OS_MACOS),y)")
 if start >= 0:
@@ -340,6 +343,12 @@ sed -i -E \
   feeds/gl_feed_1806/haproxy/Makefile
 sed -i 's/^[[:space:]]*ADDON+=USE_QUIC=1/# &/' feeds/gl_feed_1806/haproxy/Makefile
 
+grep -q 'liblua5\.4' feeds/gl_feed_1806/haproxy/Makefile ||
+  die "HAProxy Lua 5.4 兼容修改未生效"
+if grep -Eq '^[[:space:]]*ADDON\+=USE_QUIC=1' feeds/gl_feed_1806/haproxy/Makefile; then
+  die "HAProxy QUIC 仍处于启用状态"
+fi
+
 # 当前 Xray 等现代代理核心需要较新的 Go 工具链。
 rm -rf feeds/gl_feed_common/golang
 git clone --depth=1 --branch "$GOLANG_BRANCH" \
@@ -351,6 +360,9 @@ sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 # 改到仓库内固定目录，交给 Actions Cache 跨构建复用。
 sed -i 's|$(TMP_DIR)/go-build|$(TOPDIR)/.cache/go-build|g' \
   feeds/gl_feed_common/golang/golang-values.mk
+
+grep -Fq '$(TOPDIR)/.cache/go-build' feeds/gl_feed_common/golang/golang-values.mk ||
+  die "Go GOCACHE 路径修改未生效"
 
 
 section "附加应用与构建工具"
@@ -537,12 +549,49 @@ done
 echo "配置检查通过；ccache 已启用。"
 
 
-section "Host ncurses 兼容处理"
+section "主机端 ncurses 兼容处理"
 
-if ! grep -q '^HOST_CFLAGS += -fPIC$' package/libs/ncurses/Makefile; then
+if ! grep -q '^HOST_CFLAGS += -fPIC
+make package/ncurses/host/clean || true
+
+if [ -d staging_dir/hostpkg/lib ]; then
+  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
+  find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
+fi
+
+hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
+export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
+
+# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
+if [ -n "${GITHUB_ENV:-}" ]; then
+  echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+fi
+
+section "diy-part2 执行完成"
+ package/libs/ncurses/Makefile; then
   sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' \
     package/libs/ncurses/Makefile
 fi
+
+grep -q '^HOST_CFLAGS += -fPIC
+make package/ncurses/host/clean || true
+
+if [ -d staging_dir/hostpkg/lib ]; then
+  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
+  find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
+fi
+
+hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
+export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
+
+# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
+if [ -n "${GITHUB_ENV:-}" ]; then
+  echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
+fi
+
+section "diy-part2 执行完成"
+ package/libs/ncurses/Makefile ||
+  die "ncurses Host PIC 兼容修改未生效"
 
 make package/ncurses/host/clean || true
 
