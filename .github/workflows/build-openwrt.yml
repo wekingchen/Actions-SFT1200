@@ -190,15 +190,12 @@ jobs:
         path: |
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
-          # Current Go packaging uses this as GOCACHE. Keeping it across runs
-          # is especially useful for Xray/Sing-box and other Go packages.
-          openwrt/openwrt-18.06/siflower/openwrt-18.06/tmp/go-build
-        # Unique per run so the warmed cache is saved again after a successful
-        # build; restore-keys always selects the newest compatible cache first.
-        key: sft1200-ccache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}-${{ github.run_number }}
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/.cache/go-build
+        # 同一份最终配置与 feeds 共用同一个缓存，不再按 run_number 每轮复制一份。
+        # Go 的 GOCACHE 也放在这里，主要用于 Xray、Hysteria 等 Go 包。
+        key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
         restore-keys: |
-          sft1200-ccache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}-
-          sft1200-ccache-${{ runner.os }}-
+          sft1200-buildcache-${{ runner.os }}-
 
     - name: SSH connection to Actions
       uses: P3TERX/ssh2actions@v1.0.0
@@ -269,6 +266,60 @@ jobs:
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
+    - name: Validate firmware manifest
+      id: manifest
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        set -Eeuo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+
+        manifest="$(find bin/targets/siflower -type f -name '*.manifest' | head -n1)"
+        [ -n "$manifest" ] && [ -s "$manifest" ] || {
+          echo "ERROR: 未找到固件 manifest"
+          exit 1
+        }
+
+        awk '{print $1}' "$manifest" | sort -u > /tmp/sft1200-installed-packages.txt
+
+        required_packages=(
+          luci-app-passwall
+          luci-app-ssr-plus
+          xray-core
+          naiveproxy
+          hysteria
+          haproxy
+          shadowsocks-libev-ss-local
+          shadowsocks-libev-ss-redir
+          shadowsocksr-libev-ssr-local
+          shadowsocksr-libev-ssr-redir
+          trojan
+          trojan-plus
+          zerotier
+          luci-app-zerotier
+          miniupnpd
+          luci-app-upnp
+          aliyundrive-webdav
+          luci-app-aliyundrive-webdav
+        )
+
+        missing=0
+        for pkg in "${required_packages[@]}"; do
+          if grep -Fxq "$pkg" /tmp/sft1200-installed-packages.txt; then
+            printf 'OK   %s\n' "$pkg"
+          else
+            printf 'MISS %s\n' "$pkg"
+            missing=1
+          fi
+        done
+
+        if [ "$missing" -ne 0 ]; then
+          echo "ERROR: 编译成功，但关键功能包没有全部进入固件。"
+          exit 1
+        fi
+
+        echo "固件功能完整性检查通过：$manifest"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
     - name: Upload build diagnostics
       uses: actions/upload-artifact@v7
       if: failure() && steps.compile.conclusion == 'failure'
@@ -328,7 +379,7 @@ jobs:
 
     - name: Generate release tag
       id: tag
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
@@ -338,7 +389,7 @@ jobs:
 
     - name: Upload firmware to release
       uses: softprops/action-gh-release@v3
-      if: steps.compile.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
