@@ -49,28 +49,100 @@ env:
   CCACHE_MAXSIZE: 512M
 
 jobs:
+  preflight:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Static preflight
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+
+          echo "检查 Shell 语法"
+          bash -n "$DIY_P1_SH"
+          bash -n "$DIY_P2_SH"
+
+          echo "检查已知兼容约束"
+          python3 - <<'PY'
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/build-openwrt.yml").read_text()
+          checker = Path(".github/workflows/update-checker.yml").read_text()
+          diy1 = Path("diy-part1.sh").read_text()
+          diy2 = Path("diy-part2.sh").read_text()
+          config = Path(".config").read_text()
+
+          def require(condition, message):
+              if not condition:
+                  raise SystemExit(f"PRECHECK ERROR: {message}")
+
+          # setup.py 内部会创建 Git 提交，身份必须在调用前设置。
+          setup_pos = workflow.find("python3 setup.py")
+          name_pos = workflow.find('export GIT_AUTHOR_NAME="GitHub Actions"')
+          email_pos = workflow.find('export GIT_AUTHOR_EMAIL=')
+          require(setup_pos >= 0, "找不到 setup.py 调用")
+          require(0 <= name_pos < setup_pos, "Git author name 没有在 setup.py 前设置")
+          require(0 <= email_pos < setup_pos, "Git author email 没有在 setup.py 前设置")
+
+          # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
+          require("actions/cache/restore@v6" in workflow, "缺少 cache restore")
+          require("actions/cache/save@v6" in workflow, "缺少 cache save")
+          require("uses: actions/cache@v6" not in workflow, "仍存在旧的一体式 cache action")
+
+          # 固件分发必须经过 manifest 验收。
+          require(
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR" in workflow,
+              "bin Artifact 未受 manifest 验收控制",
+          )
+          require(
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE" in workflow,
+              "Release tag 未受 manifest 验收控制",
+          )
+          require(
+              "steps.manifest.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
+              in workflow,
+              "Release 上传未受 manifest 验收控制",
+          )
+
+          # manifest 只能验证 SFT1200 image manifest，不能误取 Packages.manifest。
+          require("profile_sanitized" in workflow, "manifest 未按 SFT1200 profile 精确匹配")
+          require("! -name 'Packages.manifest'" in workflow, "manifest 未排除 Packages.manifest")
+          require('awk \'NF >= 3 && $2 == "-" {print $1}\'' in workflow,
+                  "manifest 解析格式与 Siflower 18.06 opkg list-installed 不一致")
+
+          # 已明确弃用的 trojan-plus 不应再被配置或强制保留。
+          for label, text in {
+              ".config": config,
+              "diy-part2.sh": diy2,
+          }.items():
+              require("trojan-plus" not in text and "Trojan_Plus" not in text,
+                      f"{label} 仍残留 trojan-plus")
+
+          # 失效的 Codeberg 网页地址不能再作为 Makefile 下载源。
+          require(
+              "codeberg.org/aparcar/openwrt/src/branch/apk/include/openssl-engine.mk"
+              not in diy1,
+              "diy-part1.sh 仍使用会返回 HTML 的 openssl-engine.mk 地址",
+          )
+
+          # update-checker 不应回退到旧 Actions / set-output。
+          for bad in (
+              "::set-output",
+              "peter-evans/repository-dispatch@v1",
+              "delete-workflow-runs@main",
+          ):
+              require(bad not in checker, f"update-checker 仍包含旧逻辑：{bad}")
+
+          print("Static preflight OK")
+          PY
+
   build:
+    needs: preflight
     runs-on: ubuntu-22.04
 
     steps:
-    - name: Cancel older optimization test runs
-      if: github.ref_name == 'test/optimization-20260930'
-      env:
-        GH_TOKEN: ${{ github.token }}
-      run: |
-        set -Eeuo pipefail
-        gh api --paginate \
-          "repos/${GITHUB_REPOSITORY}/actions/workflows/build-openwrt.yml/runs?branch=test%2Foptimization-20260930&status=in_progress&per_page=100" \
-          --jq '.workflow_runs[].id' |
-        while read -r run_id; do
-          [ -n "$run_id" ] || continue
-          [ "$run_id" = "$GITHUB_RUN_ID" ] && continue
-          echo "Cancel old test run: $run_id"
-          gh api -X POST \
-            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" \
-            --silent || true
-        done
-
     - name: Before freeing up disk space
       run: |
         echo "Before freeing up disk space"
