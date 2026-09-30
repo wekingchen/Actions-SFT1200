@@ -213,11 +213,25 @@ jobs:
       id: compile
       run: |
         cd openwrt/openwrt-18.06/siflower/openwrt-18.06
-        echo -e "$(nproc) thread compile"
+        echo "$(nproc) thread compile"
         echo "Restored ccache directories:"
         du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
 
-        make -j$(nproc) V=s
+        # Normal builds use OpenWrt's concise output. V=s produced tens of MB
+        # of console text and caused GitHub to truncate the step log.
+        set +e
+        make -j$(nproc) 2>&1 | tee build.log
+        build_status=${PIPESTATUS[0]}
+        set -e
+
+        if [ "$build_status" -ne 0 ]; then
+          echo "::group::Detailed single-thread retry (V=s)"
+          set +e
+          make -j1 V=s 2>&1 | tee build-failure.log
+          set -e
+          echo "::endgroup::"
+          exit "$build_status"
+        fi
 
         if [ -x staging_dir/host/bin/ccache ]; then
           echo "=== ccache statistics ==="
@@ -232,6 +246,18 @@ jobs:
         grep '^CONFIG_TARGET.*DEVICE.*=y' .config | sed -r 's/.*DEVICE_(.*)=y/\1/' > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=_$(cat DEVICE_NAME)" >> $GITHUB_ENV
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: Upload build diagnostics
+      uses: actions/upload-artifact@v4
+      if: failure() && steps.compile.conclusion == 'failure'
+      with:
+        name: OpenWrt_build_diagnostics_${{ github.run_number }}
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/build.log
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/build-failure.log
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/logs
+        if-no-files-found: ignore
+        retention-days: 14
 
     - name: Check space usage
       if: (!cancelled())
