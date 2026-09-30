@@ -551,46 +551,12 @@ echo "配置检查通过；ccache 已启用。"
 
 section "主机端 ncurses 兼容处理"
 
-if ! grep -q '^HOST_CFLAGS += -fPIC
-make package/ncurses/host/clean || true
-
-if [ -d staging_dir/hostpkg/lib ]; then
-  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
-  find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
-fi
-
-hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
-export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
-
-# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
-if [ -n "${GITHUB_ENV:-}" ]; then
-  echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-fi
-
-section "diy-part2 执行完成"
- package/libs/ncurses/Makefile; then
+if ! grep -q '^HOST_CFLAGS += -fPIC$' package/libs/ncurses/Makefile; then
   sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' \
     package/libs/ncurses/Makefile
 fi
 
-grep -q '^HOST_CFLAGS += -fPIC
-make package/ncurses/host/clean || true
-
-if [ -d staging_dir/hostpkg/lib ]; then
-  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
-  find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
-fi
-
-hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
-export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
-
-# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
-if [ -n "${GITHUB_ENV:-}" ]; then
-  echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-fi
-
-section "diy-part2 执行完成"
- package/libs/ncurses/Makefile ||
+grep -q '^HOST_CFLAGS += -fPIC$' package/libs/ncurses/Makefile ||
   die "ncurses Host PIC 兼容修改未生效"
 
 make package/ncurses/host/clean || true
