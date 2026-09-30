@@ -506,7 +506,7 @@ section "同步最终配置"
 ./scripts/feeds install -f -p packages lyaml
 
 # Passwall UI 追新后，部分旧版 UI 开关已经被上游取消。
-# 这些实际功能包仍按原固件配置独立保留，避免 UI 结构变化导致功能静默丢失。
+# 仍有明确用途且当前可维护的功能包独立保留；trojan-plus 不再强制保留。
 for symbol in \
   PACKAGE_lyaml \
   PACKAGE_coreutils-timeout \
@@ -514,7 +514,6 @@ for symbol in \
   PACKAGE_shadowsocks-libev-ss-local \
   PACKAGE_shadowsocks-libev-ss-redir \
   PACKAGE_trojan \
-  PACKAGE_trojan-plus \
   PACKAGE_miniupnpd; do
   config_enable "$symbol"
 done
@@ -533,7 +532,6 @@ required_symbols=(
   PACKAGE_shadowsocks-libev-ss-local
   PACKAGE_shadowsocks-libev-ss-redir
   PACKAGE_trojan
-  PACKAGE_trojan-plus
   PACKAGE_miniupnpd
   CCACHE
 )
