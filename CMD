@@ -1,101 +1,35 @@
-git clone https://github.com/201821143044/gl-infra-builder-new gl-infra-builder
-cd gl-infra-builder
+# SFT1200 手工调试参考
+#
+# 正式构建推荐使用 GitHub Actions。
+# 兼容逻辑只维护在 diy-part1.sh / diy-part2.sh 中，不再在本文件复制一套，
+# 避免 NaiveProxy HASH、Go 版本、Passwall 依赖等逻辑长期漂移。
 
-git config --global user.email "you@example.com"
-git config --global user.name "Your Name"
-python3 setup.py -c ./configs/config-siflower-18.x.yml && cd openwrt-18.06/siflower/openwrt-18.06
+REPO_ROOT=/path/to/Actions-SFT1200
+
+git clone --depth=1 -b main \
+  https://github.com/201821143044/gl-infra-builder-new openwrt
+
+cd openwrt
+python3 setup.py -c ./configs/config-siflower-18.x.yml
+cd openwrt-18.06/siflower/openwrt-18.06
+
+# 注意：
+# GitHub Actions 的 Clone source code 步骤还会在 gen_config 前执行一层
+# SFT1200 / OpenWrt 18.06 兼容处理。需要完整复现 CI 时，以 workflow 为准。
+
 ./scripts/gen_config.py target_siflower_gl-sft1200 luci
 
-wget https://github.com/coolsnowwolf/lede/raw/master/include/meson.mk  -P ./include/
-wget https://codeberg.org/aparcar/openwrt/src/branch/apk/include/openssl-engine.mk  -P ./include/
+cp "$REPO_ROOT/feeds.conf.default" ./feeds.conf.default 2>/dev/null || true
+bash "$REPO_ROOT/diy-part1.sh"
 
-sed -i "/helloworld/d" "feeds.conf.default"
-
-echo "src-git gl https://github.com/gl-inet/gl-feeds.git;18.06" >> "feeds.conf.default"
-echo "src-git luci2 https://github.com/coolsnowwolf/luci" >> "feeds.conf.default"
-echo "src-git packages2 https://github.com/coolsnowwolf/packages" >> "feeds.conf.default"
-echo "src-git PWpackages https://github.com/xiaorouji/openwrt-passwall-packages.git;main" >> "feeds.conf.default"
-echo "src-git PWluci https://github.com/xiaorouji/openwrt-passwall.git;main" >> "feeds.conf.default"
-echo "src-git helloworld https://github.com/fw876/helloworld.git;master" >> "feeds.conf.default"
-
-./scripts/feeds clean
 ./scripts/feeds update -a
 ./scripts/feeds install -a
 
-rm -rf feeds/packages2/net/xray-core
-rm -rf feeds/packages2/net/v2ray-geodata
-rm -rf feeds/packages2/net/sing-box
-rm -rf feeds/packages2/net/chinadns-ng
-rm -rf feeds/packages2/net/dns2socks
-rm -rf feeds/packages2/net/dns2tcp
-rm -rf feeds/packages2/net/microsocks
-rm -rf feeds/packages/net/shadowsocks-libev
-cp -r feeds/packages2/lang/rust feeds/packages/lang
-cp -r feeds/PWpackages/xray-core feeds/packages2/net
-cp -r feeds/PWpackages/v2ray-geodata feeds/packages2/net
-cp -r feeds/PWpackages/sing-box feeds/packages2/net
-cp -r feeds/PWpackages/chinadns-ng feeds/packages2/net
-cp -r feeds/PWpackages/dns2socks feeds/packages2/net
-cp -r feeds/helloworld/dns2tcp feeds/packages2/net
-cp -r feeds/PWpackages/microsocks feeds/packages2/net
-cp -r feeds/PWpackages/shadowsocks-libev feeds/packages/net
+cp "$REPO_ROOT/.config" .config
+GITHUB_WORKSPACE="$REPO_ROOT" bash "$REPO_ROOT/diy-part2.sh"
 
-sed -i '/else ifeq (\$(ARCH_PREBUILT),mips_siflower)/,+1 d' \
-feeds/PWpackages/naiveproxy/Makefile
-sed -i '/^[[:space:]]*ARCH_PREBUILT:=riscv64[[:space:]]*$/a\
-else ifeq ($(ARCH_PREBUILT),mips_siflower)\
-  ARCH_PREBUILT:=mipsel_24kc-static' \
-feeds/PWpackages/naiveproxy/Makefile
-sed -i '/^else ifeq (\$(ARCH_PREBUILT),x86_64)/,/^endif/ c\
-else ifeq ($(ARCH_PREBUILT),x86_64)\n  PKG_HASH:=5681e13c833757cfb5769755fd93d1906c47448af190585067bde9de590bdb2e\nelse ifeq ($(ARCH_PREBUILT),mipsel_24kc-static)\n  PKG_HASH:=0ca95c162104c327f3f34be3f291445b098c44c5e7763206c13730e7974d7a34\nelse\n  PKG_HASH:=dummy\nendif' \
-feeds/PWpackages/naiveproxy/Makefile
-sed -i 's|-xJf $(DL_DIR)/naiveproxy-v$(PKG_VERSION)-$(PKG_RELEASE)-openwrt-$(ARCH_PREBUILT).tar.xz|-xJf $(DL_DIR)/$(PKG_SOURCE)|' \
-feeds/PWpackages/naiveproxy/Makefile
+make download -j8
+make -j"$(nproc)"
 
-rm -rf feeds/packages/devel/diffutils
-rm -rf feeds/packages/utils/jq
-rm -rf feeds/gl_feed_common/zerotier
-rm -rf feeds/gl_feed_1806/haproxy
-cp -r feeds/packages2/devel/diffutils feeds/packages/devel
-cp -r feeds/packages2/utils/jq feeds/packages/utils
-cp -r feeds/packages2/net/zerotier feeds/gl_feed_common
-cp -r feeds/packages2/net/haproxy feeds/gl_feed_1806
-
-sed -i -E \
-  -e 's/\+liblua5\.3/\+liblua5\.4/g' \
-  -e 's/LUA_LIB_NAME="?lua5\.3"?/LUA_LIB_NAME="lua5.4"/g' \
-  -e 's|/include/lua5\.3|/include/lua5.4|g' \
-  feeds/gl_feed_1806/haproxy/Makefile
-
-rm -rf feeds/gl_feed_common/golang
-git clone https://github.com/sbwml/packages_lang_golang -b 25.x feeds/gl_feed_common/golang
-sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
-
-set -euo pipefail
-rm -rf feeds/packages2/multimedia/aliyundrive-webdav feeds/luci2/applications/luci-app-aliyundrive-webdav
-git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git aliyundrive-webdav
-cp -a aliyundrive-webdav/openwrt/aliyundrive-webdav feeds/packages2/multimedia
-cp -a aliyundrive-webdav/openwrt/luci-app-aliyundrive-webdav feeds/luci2/applications
-rm -rf aliyundrive-webdav
-
-git clone https://github.com/coolsnowwolf/lede.git
-cp -r lede/tools/ninja tools
-cp -r lede/package/lean/adbyby package
-rm -rf lede
-
-git clone https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app-adguardhome
-
-rm -rf package/libs/openssl
-rm -rf package/libs/ustream-ssl
-wget 'https://github.com/wekingchen/Actions-SFT1200/raw/main/libs.zip' --no-check-certificate && unzip -o libs.zip && rm -f libs.zip
-wget https://github.com/wekingchen/Actions-SFT1200/raw/main/board-2.bin.ddcec9efd245da9365c474f513a855a55f3ac7fe -P dl/
-
-sed -i '/^PKG_BUILD_DEPENDS:=ncurses\/host/a HOST_CFLAGS += -fPIC' package/libs/ncurses/Makefile
-make package/ncurses/host/clean || true
-if [ -d staging_dir/hostpkg/lib ]; then
-  find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
-  find staging_dir/hostpkg/lib -type f -name 'libpanel.a'   -delete || true
-fi
-export LD_LIBRARY_PATH="staging_dir/hostpkg/lib:${LD_LIBRARY_PATH:-}"
-
-make menuconfig
+# 如需详细错误日志：
+# make -j1 V=s
