@@ -177,6 +177,7 @@ jobs:
         echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore source download cache
+      continue-on-error: true
       id: dl-cache
       uses: actions/cache/restore@v6
       with:
@@ -238,6 +239,7 @@ jobs:
         echo "Go toolchain HEAD: $go_head"
 
     - name: Restore compiler cache
+      continue-on-error: true
       id: build-cache-restore
       uses: actions/cache/restore@v6
       with:
@@ -266,6 +268,7 @@ jobs:
         make download -j8
 
     - name: Save source download cache
+      continue-on-error: true
       if: steps.package.conclusion == 'success' && steps.dl-cache.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
@@ -355,6 +358,7 @@ jobs:
         echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
 
     - name: Save compiler cache
+      continue-on-error: true
       if: steps.compile.outputs.status == 'success' && steps.build-cache-restore.outputs.cache-hit != 'true'
       uses: actions/cache/save@v6
       with:
