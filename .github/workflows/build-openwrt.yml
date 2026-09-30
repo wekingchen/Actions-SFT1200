@@ -139,10 +139,7 @@ jobs:
       run: |
         df -hT $PWD
         git clone --depth=1 -b $REPO_BRANCH $REPO_URL openwrt
-        ln -sf /openwrt $GITHUB_WORKSPACE/openwrt
         cd openwrt
-        git config --global user.email "you@example.com"
-        git config --global user.name "Your Name"
         python3 setup.py -c ./configs/config-siflower-18.x.yml
         cd openwrt-18.06/siflower/openwrt-18.06
 
