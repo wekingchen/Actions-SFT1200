@@ -200,6 +200,36 @@ replace_dir feeds/helloworld/shadowsocks-libev feeds/packages/net/shadowsocks-li
 # 保持较新的 Rust 工具链，以满足现代代理组件的编译要求。
 replace_dir feeds/packages2/lang/rust feeds/packages/lang/rust
 
+# Passwall 26.9.x 开始新增 lyaml 硬依赖，而原始 OpenWrt 18.06 packages 没有该包。
+# 从 packages2 引入 lyaml，同时去掉只服务现代 macOS Host 的 fakeuname 依赖，
+# 保留 Linux GitHub Runner 真正需要的 lua/host + luarocks/host 构建链。
+replace_dir feeds/packages2/lang/lyaml feeds/packages/lang/lyaml
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("feeds/packages/lang/lyaml/Makefile")
+text = path.read_text()
+
+text = text.replace(
+    "PKG_BUILD_DEPENDS:=lua/host luarocks/host HOST_OS_MACOS:fakeuname/host",
+    "PKG_BUILD_DEPENDS:=lua/host luarocks/host",
+)
+
+start = text.find("ifeq ($(CONFIG_HOST_OS_MACOS),y)")
+if start >= 0:
+    end = text.find("endif\n", start)
+    if end < 0:
+        raise SystemExit("lyaml macOS compatibility block ending not found")
+    text = text[:start] + text[end + len("endif\n"):]
+
+text = text.replace(
+    '\t$(if $(CONFIG_HOST_OS_MACOS),PATH=$(FAKEUNAME_PATH):$(TARGET_PATH_PKG)) \\\n',
+    "",
+)
+
+path.write_text(text)
+PY
+
 # OpenWrt 18.06 只有在 ./configure 可执行时才会真正运行 Build/Configure/Default。
 chmod +x feeds/PWpackages/shadowsocksr-libev/src/configure
 
@@ -450,10 +480,13 @@ section "同步最终配置"
 
 # 所有 feed / package 替换完成后，重新安装被替换包的链接并刷新包元数据。
 ./scripts/feeds install -f -p packages shadowsocks-libev
+./scripts/feeds install -f -p packages lyaml
 
 # Passwall UI 追新后，部分旧版 UI 开关已经被上游取消。
 # 这些实际功能包仍按原固件配置独立保留，避免 UI 结构变化导致功能静默丢失。
 for symbol in \
+  PACKAGE_lyaml \
+  PACKAGE_coreutils-timeout \
   PACKAGE_shadowsocks-libev-config \
   PACKAGE_shadowsocks-libev-ss-local \
   PACKAGE_shadowsocks-libev-ss-redir \
@@ -471,6 +504,8 @@ make defconfig
 
 required_symbols=(
   PACKAGE_luci-app-passwall
+  PACKAGE_lyaml
+  PACKAGE_coreutils-timeout
   PACKAGE_shadowsocks-libev-config
   PACKAGE_shadowsocks-libev-ss-local
   PACKAGE_shadowsocks-libev-ss-redir
