@@ -383,9 +383,16 @@ jobs:
           exit 1
         }
 
+        # include/version.mk 中 sanitize 的规则是：转小写、下划线改为连字符。
+        profile_sanitized="$(
+          printf '%s' "$profile" |
+          tr '[:upper:]' '[:lower:]' |
+          tr '_' '-'
+        )"
+
         mapfile -t manifests < <(
           find bin/targets/siflower -type f \
-            -name "*-${profile}.manifest" \
+            -name "*-${profile_sanitized}.manifest" \
             ! -name 'Packages.manifest' \
             -size +0c -print |
           sort
@@ -400,6 +407,7 @@ jobs:
 
         manifest="${manifests[0]}"
         echo "SFT1200 profile：$profile"
+        echo "manifest profile：$profile_sanitized"
         echo "固件 manifest：$manifest"
         echo "manifest 前 20 行："
         head -n 20 "$manifest" || true
