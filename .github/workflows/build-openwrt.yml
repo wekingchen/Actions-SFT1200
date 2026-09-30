@@ -347,6 +347,7 @@ jobs:
         files: /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
 
     - name: Delete old workflow runs
+      if: always() && !cancelled()
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -369,7 +370,7 @@ jobs:
             index=$((index + 1))
             [ "$index" -le 10 ] && continue
 
-            IFS=\t' read -r run_id created_at <<< "$row"
+            IFS="$(printf '\\t')" read -r run_id created_at <<< "$row"
             created_epoch="$(date -u -d "$created_at" +%s)"
 
             if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
@@ -401,7 +402,7 @@ jobs:
           index=$((index + 1))
           [ "$index" -le 10 ] && continue
 
-          IFS=\t' read -r created_at release_id tag_name <<< "$row"
+          IFS="$(printf '\\t')" read -r created_at release_id tag_name <<< "$row"
           echo "Delete release ${tag_name} (${created_at})"
 
           gh api -X DELETE \
