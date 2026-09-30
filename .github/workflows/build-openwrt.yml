@@ -60,6 +60,7 @@ jobs:
           echo "检查 Shell 语法"
           bash -n "$DIY_P1_SH"
           bash -n "$DIY_P2_SH"
+          bash -n scripts/archive-config.sh
 
           echo "检查已知兼容约束"
           python3 - <<'PY'
@@ -69,6 +70,7 @@ jobs:
           checker = Path(".github/workflows/update-checker.yml").read_text()
           diy1 = Path("diy-part1.sh").read_text()
           diy2 = Path("diy-part2.sh").read_text()
+          archive_config = Path("scripts/archive-config.sh").read_text()
           config = Path(".config").read_text()
 
           # 只检查 build job 正文，避免 Preflight 自己的断言字符串造成自命中。
@@ -93,6 +95,19 @@ jobs:
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
           require("actions/cache/save@v6" in build, "缺少 cache save")
           require("uses: actions/cache@v6" not in build, "仍存在旧的一体式 cache action")
+
+          # 成功构建必须留下可追溯的最终配置记录。
+          require("Generate final configuration record" in build, "缺少最终配置留档步骤")
+          require("Upload final configuration record" in build, "缺少最终配置 Artifact")
+          require("scripts/archive-config.sh" in build, "workflow 未调用配置留档工具")
+          for required in (
+              "final.config",
+              "diffconfig.txt",
+              "config-changes.diff",
+              "build-info.txt",
+              "README.txt",
+          ):
+              require(required in archive_config, f"配置留档工具缺少 {required}")
 
           # 固件分发必须经过 manifest 验收。
           require(
@@ -292,7 +307,18 @@ jobs:
       id: custom-config
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
-        [ -e $CONFIG_FILE ] && mv $CONFIG_FILE openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+
+        # 仓库 .config 是长期维护基线。保留原件，并在 diy-part2 / make defconfig
+        # 修改前保存快照，供成功构建后生成最终配置留档。
+        if [ -e "$CONFIG_FILE" ]; then
+          cp "$CONFIG_FILE" "$RUNNER_TEMP/sft1200-repository.config"
+          cp "$CONFIG_FILE" openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+        fi
+        [ -s "$RUNNER_TEMP/sft1200-repository.config" ] || {
+          echo "ERROR: 无法保存仓库 .config 基线" >&2
+          exit 1
+        }
+
         chmod +x $DIY_P2_SH
         bash -n "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
@@ -567,6 +593,29 @@ jobs:
         echo "固件功能完整性检查通过：$manifest"
         echo "status=success" >> "$GITHUB_OUTPUT"
 
+    - name: Generate final configuration record
+      id: config-record
+      if: steps.manifest.outputs.status == 'success'
+      env:
+        FEED_FINGERPRINT: ${{ steps.feed-cache.outputs.hash }}
+        BUILD_CACHE_FINGERPRINT: ${{ steps.build-cache.outputs.hash }}
+      run: |
+        chmod +x scripts/archive-config.sh
+        scripts/archive-config.sh \
+          "$RUNNER_TEMP/sft1200-repository.config" \
+          "$GITHUB_WORKSPACE/openwrt/openwrt-18.06/siflower/openwrt-18.06/.config" \
+          "$GITHUB_WORKSPACE/config-record"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    - name: Upload final configuration record
+      uses: actions/upload-artifact@v7
+      if: steps.config-record.outputs.status == 'success'
+      with:
+        name: OpenWrt_config_record${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: config-record
+        if-no-files-found: error
+        retention-days: 30
+
     - name: Upload manifest diagnostics
       uses: actions/upload-artifact@v7
       if: failure() && steps.compile.outputs.status == 'success' && steps.manifest.conclusion == 'failure'
@@ -651,7 +700,9 @@ jobs:
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
-        files: /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
+        files: |
+          /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
+          /home/runner/work/Actions-SFT1200/Actions-SFT1200/config-record/*
 
     - name: Delete old workflow runs
       if: always() && !cancelled()
