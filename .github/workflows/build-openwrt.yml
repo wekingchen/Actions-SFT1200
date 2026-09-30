@@ -323,7 +323,6 @@ jobs:
           shadowsocksr-libev-ssr-local
           shadowsocksr-libev-ssr-redir
           trojan
-          trojan-plus
           zerotier
           luci-app-zerotier
           miniupnpd
