@@ -11,9 +11,6 @@
 name: Build OpenWrt
 
 on:
-  push:
-    branches:
-      - test/optimization-20260930
   repository_dispatch:
   workflow_dispatch:
     inputs:
