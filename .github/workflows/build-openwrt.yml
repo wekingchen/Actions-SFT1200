@@ -425,7 +425,9 @@ jobs:
 
         required_packages=(
           luci-app-passwall
+          luci-i18n-passwall-zh-cn
           luci-app-ssr-plus
+          luci-i18n-ssr-plus-zh-cn
           xray-core
           naiveproxy
           hysteria
@@ -436,11 +438,9 @@ jobs:
           shadowsocksr-libev-ssr-redir
           trojan
           zerotier
-          luci-app-zerotier
           miniupnpd
           luci-app-upnp
           aliyundrive-webdav
-          luci-app-aliyundrive-webdav
         )
 
         missing=0
