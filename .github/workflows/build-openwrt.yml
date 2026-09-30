@@ -19,6 +19,10 @@ on:
         required: false
         default: 'false'
 
+permissions:
+  actions: write
+  contents: write
+
 env:
   REPO_URL: https://github.com/201821143044/gl-infra-builder-new
   REPO_BRANCH: main
@@ -151,7 +155,7 @@ jobs:
         echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
 
     - name: Restore source download cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
         key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
@@ -181,7 +185,7 @@ jobs:
         } | sha256sum | awk '{print "hash="$1}' >> "$GITHUB_OUTPUT"
 
     - name: Restore compiler cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
@@ -339,17 +343,71 @@ jobs:
         body_path: release.txt
         files: /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
 
-    - name: Delete workflow runs
-      uses: wekingchen/delete-workflow-runs@main
-      with:
-        retain_days: 30
-        keep_minimum_runs: 10
+    - name: Delete old workflow runs
+      if: always() && !cancelled()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+        cutoff_epoch="$(date -u -d '30 days ago' +%s)"
+
+        gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=100" \
+          --jq '.workflows[].id' |
+        while read -r workflow_id; do
+          [ -n "$workflow_id" ] || continue
+
+          mapfile -t runs < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
+              --jq '.workflow_runs[] | [.id, .created_at] | @tsv'
+          )
+
+          index=0
+          for row in "${runs[@]}"; do
+            index=$((index + 1))
+            [ "$index" -le 10 ] && continue
+
+            IFS=\t' read -r run_id created_at <<< "$row"
+            created_epoch="$(date -u -d "$created_at" +%s)"
+
+            if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
+              echo "Delete workflow run ${run_id} (${created_at})"
+              gh api -X DELETE \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                --silent
+            fi
+          done
+        done
 
     - name: Remove old Releases
-      uses: dev-drprasad/delete-older-releases@v0.3.4
       if: env.UPLOAD_RELEASE == 'true' && !cancelled()
-      with:
-        keep_latest: 10
-        delete_tags: true
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+
+        # GitHub returns releases newest first, but sorting by created_at makes
+        # the retention rule explicit and independent of API ordering.
+        mapfile -t releases < <(
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.created_at, .id, .tag_name] | @tsv' |
+          sort -r
+        )
+
+        index=0
+        for row in "${releases[@]}"; do
+          index=$((index + 1))
+          [ "$index" -le 10 ] && continue
+
+          IFS=\t' read -r created_at release_id tag_name <<< "$row"
+          echo "Delete release ${tag_name} (${created_at})"
+
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            --silent
+
+          # Match the previous action's delete_tags=true behavior.
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag_name}" \
+            --silent || true
+        done
