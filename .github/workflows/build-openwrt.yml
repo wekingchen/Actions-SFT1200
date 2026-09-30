@@ -190,6 +190,9 @@ jobs:
         path: |
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
           openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
+          # Current Go packaging uses this as GOCACHE. Keeping it across runs
+          # is especially useful for Xray/Sing-box and other Go packages.
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/tmp/go-build
         # Unique per run so the warmed cache is saved again after a successful
         # build; restore-keys always selects the newest compatible cache first.
         key: sft1200-ccache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}-${{ github.run_number }}
