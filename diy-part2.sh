@@ -412,23 +412,37 @@ if old in text:
 elif new not in text:
     raise SystemExit("include/cmake.mk ccache compiler block not found")
 
-old_args = """			-DCMAKE_CXX_COMPILER_ARG1="$(CMAKE_CXX_COMPILER_ARG1)" \
-			-DCMAKE_ASM_COMPILER="$(CMAKE_C_COMPILER)" \
-			-DCMAKE_ASM_COMPILER_ARG1="$(CMAKE_C_COMPILER_ARG1)" \
-"""
+if "-DCMAKE_C_COMPILER_LAUNCHER=" not in text:
+    lines = text.splitlines()
+    out = []
+    inserted_cxx = False
+    inserted_asm = False
 
-new_args = """			-DCMAKE_CXX_COMPILER_ARG1="$(CMAKE_CXX_COMPILER_ARG1)" \
-			-DCMAKE_C_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \
-			-DCMAKE_CXX_COMPILER_LAUNCHER="$(CMAKE_CXX_COMPILER_LAUNCHER)" \
-			-DCMAKE_ASM_COMPILER="$(CMAKE_C_COMPILER)" \
-			-DCMAKE_ASM_COMPILER_ARG1="$(CMAKE_C_COMPILER_ARG1)" \
-			-DCMAKE_ASM_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \
-"""
+    for line in lines:
+        out.append(line)
 
-if old_args in text:
-    text = text.replace(old_args, new_args, 1)
-elif "CMAKE_C_COMPILER_LAUNCHER" not in text[text.find("define Build/Configure/Default"):]:
-    raise SystemExit("include/cmake.mk CMake argument block not found")
+        stripped = line.strip()
+        indent = line[:len(line) - len(line.lstrip())]
+
+        if stripped.startswith('-DCMAKE_CXX_COMPILER_ARG1='):
+            out.append(
+                indent + '-DCMAKE_C_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \\'
+            )
+            out.append(
+                indent + '-DCMAKE_CXX_COMPILER_LAUNCHER="$(CMAKE_CXX_COMPILER_LAUNCHER)" \\'
+            )
+            inserted_cxx = True
+
+        if stripped.startswith('-DCMAKE_ASM_COMPILER_ARG1='):
+            out.append(
+                indent + '-DCMAKE_ASM_COMPILER_LAUNCHER="$(CMAKE_C_COMPILER_LAUNCHER)" \\'
+            )
+            inserted_asm = True
+
+    if not inserted_cxx or not inserted_asm:
+        raise SystemExit("include/cmake.mk CMake configure argument anchors not found")
+
+    text = "\n".join(out) + "\n"
 
 path.write_text(text)
 PY
