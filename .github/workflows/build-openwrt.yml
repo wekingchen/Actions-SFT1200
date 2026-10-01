@@ -116,7 +116,7 @@ jobs:
 
           def get_step(name):
               pattern = re.compile(
-                  rf"(?ms)^    - name: {re.escape(name)}\\n(?P<body>.*?)(?=^    - name: |\\Z)"
+                  rf"(?ms)^    - name: {re.escape(name)}\n(?P<body>.*?)(?=^    - name: |\Z)"
               )
               match = pattern.search(build)
               require(match is not None, f"找不到 workflow step：{name}")
