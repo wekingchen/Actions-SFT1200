@@ -104,6 +104,16 @@ jobs:
               "build job 缺少 actions: write / contents: write",
           )
 
+          # hostpkg 的 LD_LIBRARY_PATH 只能局部提供给 make，不能跨步骤污染宿主工具。
+          require('echo "LD_LIBRARY_PATH=' not in diy2,
+                  "diy-part2 仍把 LD_LIBRARY_PATH 写入 GITHUB_ENV")
+          require("export LD_LIBRARY_PATH=" not in diy2,
+                  "diy-part2 仍全局 export LD_LIBRARY_PATH")
+          require('LD_LIBRARY_PATH="$make_ld_library_path" make -j$(nproc)' in build,
+                  "并行编译未局部注入 hostpkg LD_LIBRARY_PATH")
+          require('LD_LIBRARY_PATH="$make_ld_library_path" make -j1 V=s' in build,
+                  "单线程诊断未局部注入 hostpkg LD_LIBRARY_PATH")
+
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
           require("actions/cache/save@v6" in build, "缺少 cache save")
@@ -513,10 +523,15 @@ jobs:
         echo "已恢复的 ccache 目录："
         du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
 
+        hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
+        make_ld_library_path="${hostpkg_lib}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+
         # 完整编译输出写入 build.log，避免 Actions 页面被巨量日志截断。
+        # 只给 make 及其子进程注入 hostpkg 运行时库路径，避免污染同一步骤
+        # 中的 grep / tail / ccache，更不会影响后续 Actions 步骤。
         # 后台每 5 分钟输出一次心跳，便于区分“仍在编译”和“进程已经卡住”。
         set +e
-        make -j$(nproc) > build.log 2>&1 &
+        LD_LIBRARY_PATH="$make_ld_library_path" make -j$(nproc) > build.log 2>&1 &
         build_pid=$!
 
         (
@@ -555,7 +570,7 @@ jobs:
 
           echo "::group::单线程诊断重试"
           set +e
-          make -j1 V=s > build-failure.log 2>&1
+          LD_LIBRARY_PATH="$make_ld_library_path" make -j1 V=s > build-failure.log 2>&1
           retry_status=$?
           set -e
           grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build-failure.log | tail -n 250 || true
