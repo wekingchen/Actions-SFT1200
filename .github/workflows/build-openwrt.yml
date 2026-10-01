@@ -20,8 +20,7 @@ on:
         default: 'false'
 
 permissions:
-  actions: write
-  contents: write
+  contents: read
 
 concurrency:
   group: sft1200-${{ github.workflow }}-${{ github.ref }}
@@ -93,6 +92,17 @@ jobs:
           require(setup_pos >= 0, "找不到 setup.py 调用")
           require(0 <= name_pos < setup_pos, "Git author name 没有在 setup.py 前设置")
           require(0 <= email_pos < setup_pos, "Git author email 没有在 setup.py 前设置")
+
+          # 权限遵循最小权限原则：Preflight 只读，只有 build job 可以写 Actions / Contents。
+          workflow_header = workflow.split("\njobs:\n", 1)[0]
+          require("permissions:\n  contents: read\n" in workflow_header,
+                  "workflow 顶层 permissions 不是 contents: read")
+          require("actions: write" not in workflow_header and "contents: write" not in workflow_header,
+                  "workflow 顶层仍授予写权限")
+          require(
+              "permissions:\n      actions: write\n      contents: write\n" in build,
+              "build job 缺少 actions: write / contents: write",
+          )
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
@@ -223,6 +233,9 @@ jobs:
     name: 编译 SFT1200 固件
     needs: preflight
     runs-on: ubuntu-22.04
+    permissions:
+      actions: write
+      contents: write
 
     steps:
     - name: 磁盘清理前状态
