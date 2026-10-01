@@ -244,10 +244,16 @@ jobs:
               "Release tag 未受 manifest 验收控制",
           )
           require(
-              "steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
+              "steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
               in normalized_build,
-              "Release 上传未受 manifest / 配置留档成功控制",
+              "Release 上传未受 manifest / 配置留档 / 附件准备成功控制",
           )
+          require('find "$firmware_root" -type f -name \'openwrt-*squashfs*\'' in build,
+                  "Release 附件未从真实 target 目录动态发现固件")
+          require("release-assets/*" in build,
+                  "Release 未使用统一 staging 目录上传附件")
+          require("bin/targets/siflower/" + "*/openwrt-*squashfs*" not in build,
+                  "Release 仍硬编码错误的子目录层级")
           require(
               "if: steps.release-upload.conclusion == 'success' && !cancelled()"
               in normalized_build,
@@ -888,9 +894,46 @@ jobs:
         echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
         echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
 
+    - name: 准备 Release 附件
+      id: release-assets
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        set -Eeuo pipefail
+
+        firmware_root="openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower"
+        rm -rf release-assets
+        mkdir -p release-assets
+
+        mapfile -d '' -t firmware_files < <(
+          find "$firmware_root" -type f -name 'openwrt-*squashfs*' -print0 |
+            sort -z
+        )
+        if [ "${#firmware_files[@]}" -eq 0 ]; then
+          echo "错误：未找到可发布的 squashfs 固件文件" >&2
+          find "$firmware_root" -maxdepth 2 -type f -print | sort || true
+          exit 1
+        fi
+
+        echo "准备发布 ${#firmware_files[@]} 个固件文件："
+        for file in "${firmware_files[@]}"; do
+          echo "  - $file"
+          cp -f "$file" release-assets/
+        done
+
+        mapfile -t config_files < <(find config-record -maxdepth 1 -type f -print | sort)
+        if [ "${#config_files[@]}" -eq 0 ]; then
+          echo "错误：config-record 为空" >&2
+          exit 1
+        fi
+        cp -f "${config_files[@]}" release-assets/
+
+        echo "Release 附件清单："
+        find release-assets -maxdepth 1 -type f -printf '  - %f\n' | sort
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
     - name: 生成 Release 标签
       id: tag
-      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
       run: |
         echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
         touch release.txt
@@ -901,15 +944,14 @@ jobs:
     - name: 发布固件到 Release
       id: release-upload
       uses: softprops/action-gh-release@v3
-      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: |
-          openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/*/openwrt-*squashfs*
-          config-record/*
+          release-assets/*
         fail_on_unmatched_files: true
 
     - name: 清理旧 Workflow 运行记录
