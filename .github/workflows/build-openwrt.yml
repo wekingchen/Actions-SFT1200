@@ -165,6 +165,8 @@ jobs:
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
           require("actions/cache/save@v6" in build, "缺少 cache save")
           require("uses: actions/cache@v6" not in build, "仍存在旧的一体式 cache action")
+          require("sft1200-" + "ccache-" not in build,
+                  "仍残留已弃用的旧 ccache 缓存前缀")
 
           # 编译依赖下载必须独立失败，不能藏在 apt-get 的命令替换里。
           require("apt-get -qq install $(" + "curl" not in build,
@@ -544,7 +546,6 @@ jobs:
         key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
         restore-keys: |
           sft1200-buildcache-${{ runner.os }}-
-          sft1200-ccache-${{ runner.os }}-
 
     - name: SSH 远程调试（可选）
       uses: P3TERX/ssh2actions@v1.0.0
