@@ -17,7 +17,7 @@
 核心逻辑位于 [diy-part2.sh](diy-part2.sh)：
 
 - Passwall UI 与 Passwall packages 跟随上游 main。
-- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，并同时记录当时的 `openwrt-passwall-packages` HEAD。build job 在 `feeds update` 后把 `feeds/PWpackages` 固定到同一 commit，再消费对应的版本/资产/digest，避免 Preflight 与 build 两次拉取 main 之间发生版本竞态。若目标 Release 资产没有 GitHub 提供的 SHA256 digest，则构建直接失败，不降级为“下载后自算 hash”。
+- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，并同时记录当时的 `openwrt-passwall-packages` HEAD。build job 在 `feeds update` 后把 `feeds/PWpackages` 固定到同一 commit，并用 `feeds update -i PWpackages` 仅重建索引，再消费对应的版本/资产/digest，避免 Preflight 与 build 两次拉取 main 之间发生源码与 feed 索引竞态。若目标 Release 资产没有 GitHub 提供的 SHA256 digest，则构建直接失败，不降级为“下载后自算 hash”。
 - 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件。
 - 隔离现代 LuCI 的 `luci-compat / luci-lua-runtime / ucode` 依赖，继续使用 18.06 原生 Lua LuCI。
 - 固定使用 OpenWrt 18.06 官方 miniupnpd，避免现代 nftables 变种污染旧 Kconfig。
