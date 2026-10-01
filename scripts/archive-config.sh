@@ -146,6 +146,25 @@ config-changes.diff
 build-info.txt
   记录源码 commit、Actions run、profile、feeds/build cache 指纹、PWpackages 构建快照、diy-part2 动态上游 commit、最终 .config SHA256，以及 NaiveProxy 实际版本、资产名和经 GitHub Release digest 验证的 SHA256。
 
+  排查“仓库没改但构建/功能突然变化”时，优先比较两次 build-info.txt 中：
+    source_commit
+    pwpackages_commit
+    upstream_golang_commit
+    upstream_aliyundrive_webdav_commit
+    upstream_lede_commit              # 同时对应当前引入的 ninja / adbyby
+    upstream_luci_app_adguardhome_commit
+    feed_fingerprint
+    naiveproxy_version / naiveproxy_release / naiveproxy_asset / naiveproxy_sha256
+    final_config_sha256
+
+  建议判断顺序：
+    1. source_commit 是否变化；
+    2. PWpackages 和四个 upstream commit 是否变化；
+    3. feed_fingerprint / NaiveProxy / final_config_sha256 是否变化；
+    4. 都没变化时，再检查 Actions Runner、下载、缓存或工具链环境差异。
+
+  这些 commit 仅用于追溯，不代表长期锁版本；后续构建仍按仓库既定追新策略获取最新上游。
+
 config-stats.env
   配置差异数量，供 CI 汇总使用。
 
