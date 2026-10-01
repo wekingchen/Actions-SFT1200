@@ -42,8 +42,9 @@
 - 成功构建自动生成最终配置留档，并上传 `config-record` Artifact
 - 编译成功后上传 `bin` Artifact 与 Release；Release 同时附带配置留档
 - build job 仅有 `contents: read`，`actions/checkout` 禁止持久化凭据；feeds、Makefile、`make`、`diy-part2.sh` 等第三方构建代码运行期间没有 GitHub 写令牌。
-- Release 附件先由 build job 打包为短期 Artifact，再交给独立 release job；只有 release job 拥有 `contents: write + actions: write`，并使用 Runner 自带 `gh` CLI 发布和清理，不把写令牌交给第三方 Release Action。
-- 自动清理旧 Workflow Runs；只有本轮固件成功发布 Release 后，才清理旧 Releases 并保留最近 10 个，失败构建不会占用或挤掉 Release 位置。
+- Release 附件先由 build job 打包为短期 Artifact，再交给独立 release job；release job 只有 `contents: write + actions: read`，使用 Runner 自带 `gh` CLI 发布 Release，不把写令牌交给第三方 Release Action。
+- 旧 Workflow Runs 由独立 cleanup job 清理；它只拥有 `actions: write`，即使 build 或 release 失败/跳过，只要本轮不是手动取消仍会执行。
+- 只有本轮固件成功发布 Release 后，才清理旧 Releases 并保留最近 10 个；失败构建不会占用或挤掉 Release 位置。
 
 ### SFT1200 上游更新检查
 
