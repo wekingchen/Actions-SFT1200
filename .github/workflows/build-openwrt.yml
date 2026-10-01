@@ -57,13 +57,41 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          echo "检查 Shell 语法"
+          echo "检查 GitHub Actions 与 Shell"
+          command -v shellcheck >/dev/null 2>&1 || {
+            echo "预检错误：runner 缺少 shellcheck"
+            exit 1
+          }
+
+          actionlint_version="1.7.12"
+          actionlint_sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          actionlint_archive="$RUNNER_TEMP/actionlint.tar.gz"
+          actionlint_dir="$RUNNER_TEMP/actionlint"
+
+          curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+            "https://github.com/rhysd/actionlint/releases/download/v${actionlint_version}/actionlint_${actionlint_version}_linux_amd64.tar.gz" \
+            -o "$actionlint_archive"
+          printf '%s  %s\n' "$actionlint_sha256" "$actionlint_archive" | sha256sum -c -
+          rm -rf "$actionlint_dir"
+          mkdir -p "$actionlint_dir"
+          tar -xzf "$actionlint_archive" -C "$actionlint_dir"
+
+          "$actionlint_dir/actionlint" \
+            -shellcheck="shellcheck -S error" \
+            -pyflakes= \
+            .github/workflows/*.yml
+
+          # 独立脚本也做 ShellCheck；只把 error 级问题作为阻断条件，
+          # 避免风格类 warning/noise 影响旧项目的稳定构建。
+          shellcheck -S error "$DIY_P1_SH" "$DIY_P2_SH" scripts/archive-config.sh
+
+          echo "检查脚本语法"
           bash -n "$DIY_P1_SH"
           bash -n "$DIY_P2_SH"
           bash -n scripts/archive-config.sh
           python3 -m py_compile scripts/patch-gen-config.py
 
-          echo "检查已知兼容约束"
+          echo "检查项目级兼容约束"
           python3 - <<'PY'
           from pathlib import Path
 
@@ -80,6 +108,7 @@ jobs:
           if marker not in workflow:
               raise SystemExit("预检错误：找不到 build job")
           build = workflow.split(marker, 1)[1]
+          normalized_build = " ".join(build.split())
 
           def require(condition, message):
               if not condition:
@@ -113,6 +142,14 @@ jobs:
                   "并行编译未局部注入 hostpkg LD_LIBRARY_PATH")
           require('LD_LIBRARY_PATH="$make_ld_library_path" make -j1 V=s' in build,
                   "单线程诊断未局部注入 hostpkg LD_LIBRARY_PATH")
+
+          # 通用语法/表达式错误交给 actionlint + shellcheck。
+          require("actionlint_version=\"1.7.12\"" in build,
+                  "Preflight 缺少固定版本 actionlint")
+          require("shellcheck -S error" in build,
+                  "Preflight 缺少 shellcheck error 级检查")
+          require("sha256sum -c -" in build,
+                  "actionlint 下载缺少 SHA256 校验")
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
@@ -181,21 +218,25 @@ jobs:
               require(required in archive_config, f"配置留档工具缺少 {required}")
 
           # 固件分发必须经过 manifest 验收。
+          # 对 YAML 空白做归一化，避免仅因换行/缩进调整产生误报。
           require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR" in build,
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR"
+              in normalized_build,
               "bin Artifact 未受 manifest 验收控制",
           )
           require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE" in build,
+              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE"
+              in normalized_build,
               "Release tag 未受 manifest 验收控制",
           )
           require(
               "steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
-              in build,
+              in normalized_build,
               "Release 上传未受 manifest / 配置留档成功控制",
           )
           require(
-              "if: steps.release-upload.conclusion == 'success' && !cancelled()" in build,
+              "if: steps.release-upload.conclusion == 'success' && !cancelled()"
+              in normalized_build,
               "旧 Release 清理没有绑定本轮 Release 成功状态",
           )
 
