@@ -118,6 +118,13 @@ else
   echo "naiveproxy_metadata=missing" >> "$record_dir/build-info.txt"
 fi
 
+upstream_metadata="$source_root/.sft1200-upstreams.env"
+if [ -s "$upstream_metadata" ]; then
+  cat "$upstream_metadata" >> "$record_dir/build-info.txt"
+else
+  echo "upstream_metadata=missing" >> "$record_dir/build-info.txt"
+fi
+
 echo "generated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$record_dir/build-info.txt"
 
 cat > "$record_dir/README.txt" <<'EOF'
@@ -137,7 +144,7 @@ config-changes.diff
   repository.config 与 final.config 按 CONFIG symbol 比较后的语义差异；忽略纯排序变化。
 
 build-info.txt
-  记录源码 commit、Actions run、profile、feeds/build cache 指纹、PWpackages 构建快照、最终 .config SHA256，以及 NaiveProxy 实际版本、资产名和经 GitHub Release digest 验证的 SHA256。
+  记录源码 commit、Actions run、profile、feeds/build cache 指纹、PWpackages 构建快照、diy-part2 动态上游 commit、最终 .config SHA256，以及 NaiveProxy 实际版本、资产名和经 GitHub Release digest 验证的 SHA256。
 
 config-stats.env
   配置差异数量，供 CI 汇总使用。
