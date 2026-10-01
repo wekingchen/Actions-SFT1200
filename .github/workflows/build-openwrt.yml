@@ -117,10 +117,16 @@ jobs:
           # 分离具体 job，避免安全断言误扫到其他 job 或 Preflight 自身文本。
           build_marker = "\n  build:\n"
           release_marker = "\n  release:\n"
-          if build_marker not in workflow or release_marker not in workflow:
-              raise SystemExit("预检错误：找不到 build / release job")
+          cleanup_marker = "\n  cleanup:\n"
+          if (
+              build_marker not in workflow
+              or release_marker not in workflow
+              or cleanup_marker not in workflow
+          ):
+              raise SystemExit("预检错误：找不到 build / release / cleanup job")
           preflight, remainder = workflow.split(build_marker, 1)
-          build, release = remainder.split(release_marker, 1)
+          build, remainder = remainder.split(release_marker, 1)
+          release, cleanup = remainder.split(cleanup_marker, 1)
 
           def require(condition, message):
               if not condition:
@@ -142,7 +148,7 @@ jobs:
           require(0 <= name_pos < setup_pos, "Git author name 没有在 setup.py 前设置")
           require(0 <= email_pos < setup_pos, "Git author email 没有在 setup.py 前设置")
 
-          # 权限隔离：preflight/build 只读；只有不执行第三方构建代码的 release job 可以写。
+          # 权限隔离：preflight/build 只读；release 只负责发布；cleanup 只负责 Actions 清理。
           workflow_header = workflow.split("\njobs:\n", 1)[0]
           require("permissions:\n  contents: read\n" in workflow_header,
                   "workflow 顶层 permissions 不是 contents: read")
@@ -153,9 +159,17 @@ jobs:
           require("actions: write" not in build and "contents: write" not in build,
                   "build job 仍持有写权限")
           require(
-              "permissions:\n      actions: write\n      contents: write\n" in release,
-              "release job 缺少 actions: write / contents: write",
+              "permissions:\n      actions: read\n      contents: write\n" in release,
+              "release job 权限不是 actions: read / contents: write",
           )
+          require("actions: write" not in release,
+                  "release job 仍持有不必要的 actions: write")
+          require(
+              "permissions:\n      actions: write\n" in cleanup,
+              "cleanup job 缺少 actions: write",
+          )
+          require("contents: write" not in cleanup,
+                  "cleanup job 不应持有 contents: write")
 
           preflight_checkout = get_step(preflight, "检出仓库")
           build_checkout = get_step(build, "检出仓库")
@@ -288,6 +302,7 @@ jobs:
           release_bundle_step = get_step(build, "上传 Release 交接包")
           release_step = get_step(release, "发布固件到 Release")
           release_cleanup_step = get_step(release, "清理旧 Releases")
+          workflow_cleanup_step = get_step(cleanup, "清理旧 Workflow 运行记录")
 
           for token in (
               "steps.manifest.outputs.status == 'success'",
@@ -325,6 +340,14 @@ jobs:
                   "旧 Release 清理没有绑定本轮 Release 成功状态")
           require("!cancelled()" in release_cleanup_step,
                   "旧 Release 清理缺少 cancelled() 保护")
+          require("needs: [build, release]" in cleanup,
+                  "cleanup job 没有等待 build / release 收尾")
+          require("if: always() && !cancelled()" in cleanup,
+                  "cleanup job 未配置失败时也执行")
+          require("GH_TOKEN:" in workflow_cleanup_step and "secrets.GITHUB_TOKEN" in workflow_cleanup_step,
+                  "Workflow 清理步骤缺少 Actions 写 token")
+          require("actions/runs/" in workflow_cleanup_step and "gh api -X DELETE" in workflow_cleanup_step,
+                  "Workflow 清理步骤没有删除旧 runs")
 
           # manifest 只能验证 SFT1200 image manifest，不能误取 Packages.manifest。
           require("profile_sanitized" in build, "manifest 未按 SFT1200 profile 精确匹配")
@@ -1085,7 +1108,7 @@ jobs:
     runs-on: ubuntu-22.04
     timeout-minutes: 20
     permissions:
-      actions: write
+      actions: read
       contents: write
 
     steps:
@@ -1127,8 +1150,49 @@ jobs:
         echo "发布完成：$release_tag"
         echo "status=success" >> "$GITHUB_OUTPUT"
 
+    - name: 清理旧 Releases
+      if: steps.release-upload.outputs.status == 'success' && !cancelled()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+
+        mapfile -t releases < <(
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.created_at, .id, .tag_name] | @tsv' |
+          sort -r
+        )
+
+        index=0
+        for row in "${releases[@]}"; do
+          index=$((index + 1))
+          [ "$index" -le 10 ] && continue
+
+          created_at="$(printf '%s\n' "$row" | cut -f1)"
+          release_id="$(printf '%s\n' "$row" | cut -f2)"
+          tag_name="$(printf '%s\n' "$row" | cut -f3-)"
+          echo "删除 Release ${tag_name}（${created_at}）"
+
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            --silent
+
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag_name}" \
+            --silent || true
+        done
+
+  cleanup:
+    name: 清理旧 Workflow 运行记录
+    needs: [build, release]
+    if: always() && !cancelled()
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      actions: write
+
+    steps:
     - name: 清理旧 Workflow 运行记录
-      if: always() && !cancelled()
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
@@ -1164,34 +1228,3 @@ jobs:
           done
         done
 
-    - name: 清理旧 Releases
-      if: steps.release-upload.outputs.status == 'success' && !cancelled()
-      env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        set -Eeuo pipefail
-
-        mapfile -t releases < <(
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
-            --jq '.[] | [.created_at, .id, .tag_name] | @tsv' |
-          sort -r
-        )
-
-        index=0
-        for row in "${releases[@]}"; do
-          index=$((index + 1))
-          [ "$index" -le 10 ] && continue
-
-          created_at="$(printf '%s\n' "$row" | cut -f1)"
-          release_id="$(printf '%s\n' "$row" | cut -f2)"
-          tag_name="$(printf '%s\n' "$row" | cut -f3-)"
-          echo "删除 Release ${tag_name}（${created_at}）"
-
-          gh api -X DELETE \
-            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
-            --silent
-
-          gh api -X DELETE \
-            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag_name}" \
-            --silent || true
-        done
