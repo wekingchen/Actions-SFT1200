@@ -101,6 +101,7 @@ scripts/archive-config.sh \
 - `diy-part2.sh`：主要兼容层和软件包替换逻辑。
 - `.github/workflows/build-openwrt.yml`：主编译工作流。
 - `.github/workflows/update-checker.yml`：Passwall 与 helloworld 上游更新监控。
+- `scripts/patch-gen-config.py`：以可审查方式为上游 `scripts/gen_config.py` 注入 SFT1200/OpenWrt 18.06 feeds 兼容钩子。
 - `scripts/archive-config.sh`：成功构建的最终配置留档与差异生成工具。
 - `libs.zip`：本仓库维护的 OpenSSL / ustream 兼容文件。
 - `board-2.bin.*`：SFT1200 板级文件。
