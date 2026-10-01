@@ -931,6 +931,7 @@ jobs:
       if: steps.manifest.outputs.status == 'success'
       env:
         FEED_FINGERPRINT: ${{ steps.feed-cache.outputs.hash }}
+        PWPACKAGES_COMMIT: ${{ needs.preflight.outputs.pwpackages_commit }}
         BUILD_CACHE_FINGERPRINT: ${{ steps.build-cache.outputs.hash }}
       run: |
         chmod +x scripts/archive-config.sh
