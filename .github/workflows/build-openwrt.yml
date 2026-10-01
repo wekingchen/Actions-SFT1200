@@ -820,7 +820,7 @@ jobs:
               make "$failed_target" -j1 V=s > build-failure.log 2>&1
             retry_status=$?
           else
-            echo "未能从 build.log 稳定识别失败 package target。"
+            echo "未能从 build.log 稳定识别 package / tools / toolchain 失败目标。"
             echo "执行有限时的全量单线程诊断，最多 $diagnostic_timeout，不允许无限重跑。"
             timeout --signal=TERM --kill-after=1m "$diagnostic_timeout" \
               env LD_LIBRARY_PATH="$make_ld_library_path" \
