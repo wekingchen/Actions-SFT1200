@@ -125,6 +125,17 @@ else
   echo "upstream_metadata=missing" >> "$record_dir/build-info.txt"
 fi
 
+feed_commits_file="${FEED_COMMITS_FILE:-}"
+if [ -n "$feed_commits_file" ]; then
+  [ -s "$feed_commits_file" ] || {
+    echo "ERROR: feeds commit 明细不存在：$feed_commits_file" >&2
+    exit 1
+  }
+  cp "$feed_commits_file" "$record_dir/feed-commits.txt"
+else
+  echo "# FEED_COMMITS_FILE 未提供；本地手工留档未包含 feeds commit 明细。" > "$record_dir/feed-commits.txt"
+fi
+
 echo "generated_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$record_dir/build-info.txt"
 
 cat > "$record_dir/README.txt" <<'EOF'
@@ -144,7 +155,11 @@ config-changes.diff
   repository.config 与 final.config 按 CONFIG symbol 比较后的语义差异；忽略纯排序变化。
 
 build-info.txt
-  记录源码 commit、Actions run、profile、feeds/build cache 指纹、PWpackages 构建快照、diy-part2 动态上游 commit、最终 .config SHA256，以及 NaiveProxy 实际版本、资产名和经 GitHub Release digest 验证的 SHA256。
+  记录源码 commit、Actions run、profile、feeds/build cache 指纹、PWpackages 构建快照、动态上游 commit / SHA256、最终 .config SHA256，以及 NaiveProxy 实际版本、资产名和经 GitHub Release digest 验证的 SHA256。
+
+feed-commits.txt
+  记录本轮 feeds update 后、PWpackages 固定快照并重建索引之后，各 feed 实际 HEAD commit。
+  feed_fingerprint 不同时，先比较本文件即可直接定位是 packages2、luci2、helloworld、PWluci 等哪个 feed 变化。
 
   排查“仓库没改但构建/功能突然变化”时，优先比较两次 build-info.txt 中：
     source_commit
