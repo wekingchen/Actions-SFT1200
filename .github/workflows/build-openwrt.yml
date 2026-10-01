@@ -591,6 +591,14 @@ jobs:
         }
         echo "PWpackages 本轮构建快照：$actual_commit"
 
+        # feeds update -a 已经按当时的 main 生成过 PWpackages.index。
+        # checkout 到固定 commit 后只重建索引，不重新拉取远端，确保
+        # 后续 feeds install 看到的包列表与本轮实际源码快照一致。
+        (
+          cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+          ./scripts/feeds update -i PWpackages
+        )
+
     - name: 计算 Feeds 缓存指纹
       id: feed-cache
       run: |
