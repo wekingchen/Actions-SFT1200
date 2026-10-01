@@ -97,6 +97,16 @@ jobs:
           require("actions/cache/save@v6" in build, "缺少 cache save")
           require("uses: actions/cache@v6" not in build, "仍存在旧的一体式 cache action")
 
+          # 编译依赖下载必须独立失败，不能藏在 apt-get 的命令替换里。
+          require("apt-get -qq install $(" + "curl" not in build,
+                  "编译依赖仍通过命令替换下载，curl 失败可能被静默吞掉")
+          require('deps_file="$RUNNER_TEMP/openwrt-build-deps.txt"' in build,
+                  "缺少编译依赖临时文件")
+          require('[ ! -s "$deps_file" ]' in build,
+                  "编译依赖下载后缺少非空校验")
+          require('apt-get -qq install "${build_deps[@]}"' in build,
+                  "编译依赖没有使用校验后的数组安装")
+
           # 成功构建必须留下可追溯的最终配置记录。
           require("生成最终配置留档" in build, "缺少最终配置留档步骤")
           require("上传最终配置留档" in build, "缺少最终配置 Artifact")
@@ -228,11 +238,590 @@ jobs:
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
+        set -Eeuo pipefail
+
         sudo rm -rf /etc/apt/sources.list.d* /usr/local/lib/android* /etc/docker* /etc/firefox* /etc/mysql* /etc/php* /opt/google* /usr/share/dotnet* /usr/share/google* /usr/share/moby* /usr/share/mysql* /usr/share/php*
         sudo -E apt-get -qq update
         sudo add-apt-repository universe
         sudo apt-get update
-        sudo -E apt-get -qq install $(curl -fsSL raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS)
+
+        deps_file="$RUNNER_TEMP/openwrt-build-deps.txt"
+        deps_url="https://raw.githubusercontent.com/wekingchen/my-file/master/depends-ubuntuLTS"
+        echo "下载 OpenWrt 编译依赖列表：$deps_url"
+        if ! curl -fsSL --retry 3 --retry-delay 2 --retry-all-errors \
+          "$deps_url" -o "$deps_file"; then
+          echo "错误：编译依赖列表下载失败"
+          exit 1
+        fi
+        if [ ! -s "$deps_file" ]; then
+          echo "错误：编译依赖列表为空"
+          exit 1
+        fi
+
+        mapfile -t build_deps < <(
+          tr -s '[:space:]' '\n' < "$deps_file" |
+            sed '/^$/d'
+        )
+        if [ "${#build_deps[@]}" -eq 0 ]; then
+          echo "错误：编译依赖列表解析后为空"
+          exit 1
+        fi
+        if printf '%s\n' "${build_deps[@]}" |
+          grep -Eqv '^[A-Za-z0-9][A-Za-z0-9+.:~-]*
+    - name: 克隆并生成 Siflower 源码
+      working-directory: ./
+      run: |
+        df -hT $PWD
+        git clone --depth=1 -b $REPO_BRANCH $REPO_URL openwrt
+        cd openwrt
+
+        # setup.py 会在内部 Siflower 仓库应用 patch 并创建 Git 提交。
+        # GitHub Runner 不保证预设提交者身份，因此在调用 setup.py 之前显式设置，
+        # 并同时导出环境变量，确保 setup.py 创建的子仓库也能继承。
+        export GIT_AUTHOR_NAME="GitHub Actions"
+        export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+        export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+        export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+        git config --global user.name "$GIT_AUTHOR_NAME"
+        git config --global user.email "$GIT_AUTHOR_EMAIL"
+
+        [ -n "$(git config --global user.name)" ] ||
+          { echo "错误：Git user.name 未设置"; exit 1; }
+        [ -n "$(git config --global user.email)" ] ||
+          { echo "错误：Git user.email 未设置"; exit 1; }
+
+        python3 setup.py -c ./configs/config-siflower-18.x.yml
+        cd openwrt-18.06/siflower/openwrt-18.06
+
+        # OpenWrt 18.06 compatibility: current feeds pull dependencies too new for this tree.
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/luci.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_sft1200.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_common.yml
+        sed -i '/^[[:space:]]*-[[:space:]]*dnsmasq-full[[:space:]]*$/d' profiles/glinet_depends.yml
+
+        python3 -c "import base64; exec(base64.b64decode('CmZyb20gcGF0aGxpYiBpbXBvcnQgUGF0aAoKcCA9IFBhdGgoInNjcmlwdHMvZ2VuX2NvbmZpZy5weSIpCnMgPSBwLnJlYWRfdGV4dCgpCgpuZWVkbGUgPSAiICAgIGdlbmVyYXRlX2NvbmZpZyhwcm9maWxlKVxuIgpob29rID0gKAogICAgIiAgICAjIENvbXBhdGliaWxpdHkgaG9vayBmb3IgR0wtU0ZUMTIwMCAvIFNpZmxvd2VyIE9wZW5XcnQgMTguMDYuXG4iCiAgICAiICAgIGNhbGwoJ2ZpbmQgcGFja2FnZS9mZWVkcyBmZWVkcyAtcGF0aCBcIipkbnNtYXNxL01ha2VmaWxlXCIgLXR5cGUgZiAtcHJpbnQwIDI+L2Rldi9udWxsIHwgeGFyZ3MgLTAgLXIgc2VkIC1pIFwicy8rUEFDS0FHRV9kbnNtYXNxX2Z1bGxfbmZ0c2V0Om5mdGFibGVzLWpzb24vL2dcIicsIHNoZWxsPVRydWUpXG4iCiAgICAiICAgIGNhbGwoJ2ZpbmQgcGFja2FnZS9mZWVkcyBmZWVkcyAtbWF4ZGVwdGggNSAtdHlwZSBkIC1uYW1lIFwic2FtYmE0XCIgLXBydW5lIC1leGVjIHJtIC1yZiB7fSArIDI+L2Rldi9udWxsIHx8IHRydWUnLCBzaGVsbD1UcnVlKVxuIgogICAgIiAgICBjYWxsKCdmaW5kIHBhY2thZ2UvZmVlZHMgZmVlZHMgLW1heGRlcHRoIDUgLXR5cGUgZCBcXCggIgogICAgIi1uYW1lIFwicHl0aG9uMy1jcnlwdG9kb21lXCIgLW8gIgogICAgIi1uYW1lIFwicHl0aG9uMy1pbmZsdXhkYlwiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtcmVxdWVzdHNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWFpb2h0dHBcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWFpb2h0dHAtY29yc1wiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtYXR0cnNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXNlbnRyeS1zZGtcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWNlcnRpZmlcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWRhdGV1dGlsXCIgLW8gIgogICAgIi1uYW1lIFwicHl0aG9uMy1kbnNcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLWlkbmFcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXlhcmxcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXB5dHpcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXNpeFwiIC1vICIKICAgICItbmFtZSBcInB5dGhvbjMtanNvbnBhdGgtbmdcIiAtbyAiCiAgICAiLW5hbWUgXCJweXRob24zLXBseVwiICIKICAgICJcXCkgLXBydW5lIC1leGVjIHJtIC1yZiB7fSArIDI+L2Rldi9udWxsIHx8IHRydWUnLCBzaGVsbD1UcnVlKVxuIgogICAgIiAgICBnZW5lcmF0ZV9jb25maWcocHJvZmlsZSlcbiIKKQoKaWYgIkNvbXBhdGliaWxpdHkgaG9vayBmb3IgR0wtU0ZUMTIwMCIgbm90IGluIHM6CiAgICBpZiBuZWVkbGUgbm90IGluIHM6CiAgICAgICAgcmFpc2UgU3lzdGVtRXhpdCgiZ2VuZXJhdGVfY29uZmlnKHByb2ZpbGUpIG5vdCBmb3VuZCBpbiBzY3JpcHRzL2dlbl9jb25maWcucHkiKQogICAgcyA9IHMucmVwbGFjZShuZWVkbGUsIGhvb2ssIDEpCiAgICBwLndyaXRlX3RleHQocykKICAgIHByaW50KCJQYXRjaGVkIHNjcmlwdHMvZ2VuX2NvbmZpZy5weSIpCmVsc2U6CiAgICBwcmludCgic2NyaXB0cy9nZW5fY29uZmlnLnB5IGFscmVhZHkgcGF0Y2hlZCIpCg=='))"
+        ./scripts/gen_config.py target_siflower_gl-sft1200 luci
+
+    - name: 加载自定义 Feeds
+      run: |
+        [ -e $FEEDS_CONF ] && mv $FEEDS_CONF openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds.conf.default
+        chmod +x $DIY_P1_SH
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        $GITHUB_WORKSPACE/$DIY_P1_SH
+
+    - name: 更新 Feeds
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
+
+    - name: 计算 Feeds 缓存指纹
+      id: feed-cache
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        {
+          for feed in feeds/*; do
+            [ -d "$feed" ] || continue
+            if git -C "$feed" rev-parse HEAD >/dev/null 2>&1; then
+              printf '%s=%s\n' "$(basename "$feed")" "$(git -C "$feed" rev-parse HEAD)"
+            fi
+          done
+        } | sort | tee /tmp/sft1200-feed-commits.txt
+        echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+    - name: 恢复源码下载缓存
+      continue-on-error: true
+      id: dl-cache
+      uses: actions/cache/restore@v6
+      with:
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
+        key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
+        restore-keys: |
+          sft1200-dl-${{ runner.os }}-
+
+    - name: 安装 Feeds
+      run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds install -a
+
+    - name: 加载并应用自定义配置
+      id: custom-config
+      run: |
+        [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
+
+        # 仓库 .config 是长期维护基线。保留原件，并在 diy-part2 / make defconfig
+        # 修改前保存快照，供成功构建后生成最终配置留档。
+        if [ -e "$CONFIG_FILE" ]; then
+          cp "$CONFIG_FILE" "$RUNNER_TEMP/sft1200-repository.config"
+          cp "$CONFIG_FILE" openwrt/openwrt-18.06/siflower/openwrt-18.06/.config
+        fi
+        [ -s "$RUNNER_TEMP/sft1200-repository.config" ] || {
+          echo "错误：无法保存仓库 .config 基线" >&2
+          exit 1
+        }
+
+        chmod +x $DIY_P2_SH
+        bash -n "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+
+        set +e
+        "$GITHUB_WORKSPACE/$DIY_P2_SH" > diy-part2.log 2>&1
+        config_status=$?
+        set -e
+
+        if [ "$config_status" -ne 0 ]; then
+          echo "::group::diy-part2 配置阶段错误摘要"
+          grep -nE '(ERROR:|error:|Error [0-9]+|not found|not retained|dependency|recursive dependency|Traceback|SystemExit)' diy-part2.log | tail -n 200 || true
+          echo
+          echo "diy-part2.log 最后 300 行："
+          tail -n 300 diy-part2.log || true
+          echo "::endgroup::"
+          exit "$config_status"
+        fi
+
+        tail -n 80 diy-part2.log || true
+
+    - name: 上传配置失败诊断
+      uses: actions/upload-artifact@v7
+      if: failure() && steps.custom-config.conclusion == 'failure'
+      with:
+        name: OpenWrt_config_diagnostics_${{ github.run_number }}
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/diy-part2.log
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: 计算编译缓存指纹
+      id: build-cache
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        go_head="$(git -C feeds/gl_feed_common/golang rev-parse HEAD)"
+        {
+          sha256sum .config
+          sha256sum "$GITHUB_WORKSPACE/$DIY_P2_SH"
+          printf 'feeds=%s\n' "${{ steps.feed-cache.outputs.hash }}"
+          printf 'go=%s\n' "$go_head"
+        } | sha256sum | awk '{print "hash="$1}' >> "$GITHUB_OUTPUT"
+        echo "Go 工具链 HEAD：$go_head"
+
+    - name: 恢复编译缓存
+      continue-on-error: true
+      id: build-cache-restore
+      uses: actions/cache/restore@v6
+      with:
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/.cache/go-build
+        # 同一份最终配置与 feeds 共用同一个缓存，不再按 run_number 每轮复制一份。
+        # Go 的 GOCACHE 也放在这里，主要用于 Xray、Hysteria 等 Go 包。
+        key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
+        restore-keys: |
+          sft1200-buildcache-${{ runner.os }}-
+          sft1200-ccache-${{ runner.os }}-
+
+    - name: SSH 远程调试（可选）
+      uses: P3TERX/ssh2actions@v1.0.0
+      if: (github.event.inputs.ssh == 'true' && github.event.inputs.ssh  != 'false') || contains(github.event.action, 'ssh')
+      env:
+        TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+
+    - name: 下载软件包源码
+      id: package
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        make download -j8
+
+    - name: 保存源码下载缓存
+      continue-on-error: true
+      if: steps.package.conclusion == 'success' && steps.dl-cache.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/dl
+        key: sft1200-dl-${{ runner.os }}-${{ steps.feed-cache.outputs.hash }}
+        
+    - name: 编译固件
+      id: compile
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+        echo "使用 $(nproc) 个线程编译"
+        echo "已恢复的 ccache 目录："
+        du -sh staging_dir/host/ccache staging_dir/target-*/ccache 2>/dev/null || true
+
+        # 完整编译输出写入 build.log，避免 Actions 页面被巨量日志截断。
+        # 后台每 5 分钟输出一次心跳，便于区分“仍在编译”和“进程已经卡住”。
+        set +e
+        make -j$(nproc) > build.log 2>&1 &
+        build_pid=$!
+
+        (
+          while kill -0 "$build_pid" 2>/dev/null; do
+            sleep 300
+            kill -0 "$build_pid" 2>/dev/null || break
+
+            log_size="$(du -h build.log 2>/dev/null | awk '{print $1}')"
+            log_mtime="$(stat -c '%y' build.log 2>/dev/null | cut -d'.' -f1)"
+            last_line="$(tail -n 1 build.log 2>/dev/null | tr '\n\r' '  ')"
+
+            printf '[编译心跳] %s | PID=%s alive | build.log=%s | mtime=%s | %s\n' \
+              "$(date '+%Y-%m-%d %H:%M:%S')" \
+              "$build_pid" \
+              "${log_size:-0}" \
+              "${log_mtime:-unknown}" \
+              "${last_line:-暂无新日志}"
+          done
+        ) &
+        heartbeat_pid=$!
+
+        wait "$build_pid"
+        build_status=$?
+
+        kill "$heartbeat_pid" 2>/dev/null || true
+        wait "$heartbeat_pid" 2>/dev/null || true
+        set -e
+
+        if [ "$build_status" -ne 0 ]; then
+          echo "::group::并行编译错误摘要"
+          grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build.log | tail -n 200 || true
+          echo
+          echo "build.log 最后 200 行："
+          tail -n 200 build.log || true
+          echo "::endgroup::"
+
+          echo "::group::单线程诊断重试"
+          set +e
+          make -j1 V=s > build-failure.log 2>&1
+          retry_status=$?
+          set -e
+          grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build-failure.log | tail -n 250 || true
+          echo
+          echo "build-failure.log 最后 300 行："
+          tail -n 300 build-failure.log || true
+          echo "单线程诊断重试退出状态：$retry_status"
+          echo "::endgroup::"
+
+          exit "$build_status"
+        fi
+
+        echo "固件编译完成。"
+        echo "build.log 最后 40 行："
+        tail -n 40 build.log || true
+
+        if [ -x staging_dir/host/bin/ccache ]; then
+          echo "=== ccache 统计 ==="
+          for cache_dir in staging_dir/host/ccache staging_dir/target-*/ccache; do
+            [ -d "$cache_dir" ] || continue
+            echo "--- $cache_dir ---"
+            CCACHE_DIR="$cache_dir" staging_dir/host/bin/ccache -s || true
+          done
+        fi
+
+        echo "status=success" >> $GITHUB_OUTPUT
+        profile="$(
+          sed -n 's/^CONFIG_TARGET_siflower_sf19a28_fullmask_\(.*\)=y$/\1/p' .config |
+          head -n1
+        )"
+        [ -n "$profile" ] || {
+          echo "错误：无法从 .config 识别 SFT1200 profile" >&2
+          exit 1
+        }
+        printf '%s\n' "$profile" > DEVICE_NAME
+        echo "DEVICE_NAME=_$profile" >> "$GITHUB_ENV"
+        echo "FILE_DATE=_$(date +"%Y%m%d%H%M")" >> $GITHUB_ENV
+
+    - name: 保存编译缓存
+      continue-on-error: true
+      if: steps.compile.outputs.status == 'success' && steps.build-cache-restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/host/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/staging_dir/target-*/ccache
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/.cache/go-build
+        key: sft1200-buildcache-${{ runner.os }}-${{ steps.build-cache.outputs.hash }}
+
+    - name: 校验固件功能完整性
+      id: manifest
+      if: steps.compile.outputs.status == 'success'
+      run: |
+        set -Eeuo pipefail
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06
+
+        profile="$(
+          sed -n 's/^CONFIG_TARGET_siflower_sf19a28_fullmask_\(.*\)=y$/\1/p' .config |
+          head -n1
+        )"
+        [ -n "$profile" ] || {
+          echo "错误：无法从 .config 识别 SFT1200 profile"
+          exit 1
+        }
+
+        # include/version.mk 中 sanitize 的规则是：转小写、下划线改为连字符。
+        profile_sanitized="$(
+          printf '%s' "$profile" |
+          tr '[:upper:]' '[:lower:]' |
+          tr '_' '-'
+        )"
+
+        mapfile -t manifests < <(
+          find bin/targets/siflower -type f \
+            -name "*-${profile_sanitized}.manifest" \
+            ! -name 'Packages.manifest' \
+            -size +0c -print |
+          sort
+        )
+
+        if [ "${#manifests[@]}" -ne 1 ]; then
+          echo "错误：SFT1200 应只对应 1 份 image manifest，实际找到 ${#manifests[@]} 份"
+          echo "当前所有 manifest："
+          find bin/targets/siflower -type f -name '*.manifest' -print | sort || true
+          exit 1
+        fi
+
+        manifest="${manifests[0]}"
+        echo "SFT1200 profile：$profile"
+        echo "manifest profile：$profile_sanitized"
+        echo "固件 manifest：$manifest"
+        echo "manifest 前 20 行："
+        head -n 20 "$manifest" || true
+
+        # Siflower 18.06 的 Image/Manifest 明确来自 opkg list-installed，
+        # 格式固定为：package-name - version。
+        awk 'NF >= 3 && $2 == "-" {print $1}' "$manifest" |
+          sort -u > /tmp/sft1200-installed-packages.txt
+
+        [ -s /tmp/sft1200-installed-packages.txt ] || {
+          echo "错误：image manifest 解析后没有任何已安装包"
+          exit 1
+        }
+
+        required_packages=(
+          luci-app-passwall
+          luci-i18n-passwall-zh-cn
+          luci-app-ssr-plus
+          luci-i18n-ssr-plus-zh-cn
+          xray-core
+          naiveproxy
+          hysteria
+          haproxy
+          shadowsocks-libev-ss-local
+          shadowsocks-libev-ss-redir
+          shadowsocksr-libev-ssr-local
+          shadowsocksr-libev-ssr-redir
+          trojan
+          zerotier
+          miniupnpd
+          luci-app-upnp
+          aliyundrive-webdav
+        )
+
+        missing=0
+        for pkg in "${required_packages[@]}"; do
+          if grep -Fxq "$pkg" /tmp/sft1200-installed-packages.txt; then
+            printf '通过  %s\n' "$pkg"
+          else
+            printf '缺失  %s\n' "$pkg"
+            missing=1
+          fi
+        done
+
+        if [ "$missing" -ne 0 ]; then
+          echo "错误：编译成功，但关键功能包没有全部进入 SFT1200 最终固件。"
+          exit 1
+        fi
+
+        echo "固件功能完整性检查通过：$manifest"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    - name: 生成最终配置留档
+      id: config-record
+      if: steps.manifest.outputs.status == 'success'
+      env:
+        FEED_FINGERPRINT: ${{ steps.feed-cache.outputs.hash }}
+        BUILD_CACHE_FINGERPRINT: ${{ steps.build-cache.outputs.hash }}
+      run: |
+        chmod +x scripts/archive-config.sh
+        scripts/archive-config.sh \
+          "$RUNNER_TEMP/sft1200-repository.config" \
+          "$GITHUB_WORKSPACE/openwrt/openwrt-18.06/siflower/openwrt-18.06/.config" \
+          "$GITHUB_WORKSPACE/config-record"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    - name: 上传最终配置留档
+      uses: actions/upload-artifact@v7
+      if: steps.config-record.outputs.status == 'success'
+      with:
+        name: OpenWrt_config_record${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: config-record
+        if-no-files-found: error
+        retention-days: 30
+
+    - name: 上传 Manifest 失败诊断
+      uses: actions/upload-artifact@v7
+      if: failure() && steps.compile.outputs.status == 'success' && steps.manifest.conclusion == 'failure'
+      with:
+        name: OpenWrt_manifest_diagnostics_${{ github.run_number }}
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/**/*.manifest
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: 上传编译失败诊断
+      uses: actions/upload-artifact@v7
+      if: failure() && steps.compile.conclusion == 'failure'
+      with:
+        name: OpenWrt_build_diagnostics_${{ github.run_number }}
+        path: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/build.log
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/build-failure.log
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/logs
+        if-no-files-found: ignore
+        retention-days: 14
+
+    - name: 检查磁盘占用
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 上传完整 bin 目录
+      uses: actions/upload-artifact@v7
+      if: always() && steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: openwrt/openwrt-18.06/siflower/openwrt-18.06/bin
+
+    - name: 整理固件文件
+      id: organize
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && env.UPLOAD_FIRMWARE == 'true' && !cancelled()
+      run: |
+        cd openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/*/*
+        rm -rf packages
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 上传固件目录
+      uses: actions/upload-artifact@v7
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        path: ${{ env.FIRMWARE }}
+
+    - name: 上传固件到 CowTransfer
+      id: cowtransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_COWTRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer cow --block 2621440 -s -p 64 --no-progress ${FIRMWARE} 2>&1 | tee cowtransfer.log
+        echo "::warning file=cowtransfer.com::$(cat cowtransfer.log | grep https)"
+        echo "url=$(cat cowtransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: 上传固件到 WeTransfer
+      id: wetransfer
+      if: steps.organize.outputs.status == 'success' && env.UPLOAD_WETRANSFER == 'true' && !cancelled()
+      run: |
+        curl -fsSL git.io/file-transfer | sh
+        ./transfer wet -s -p 16 --no-progress ${FIRMWARE} 2>&1 | tee wetransfer.log
+        echo "::warning file=wetransfer.com::$(cat wetransfer.log | grep https)"
+        echo "url=$(cat wetransfer.log | grep https | cut -f3 -d" ")" >> $GITHUB_OUTPUT
+
+    - name: 生成 Release 标签
+      id: tag
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      run: |
+        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
+        touch release.txt
+        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
+        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
+        echo "status=success" >> $GITHUB_OUTPUT
+
+    - name: 发布固件到 Release
+      id: release-upload
+      uses: softprops/action-gh-release@v3
+      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        body_path: release.txt
+        files: |
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/*/openwrt-*squashfs*
+          config-record/*
+        fail_on_unmatched_files: true
+
+    - name: 清理旧 Workflow 运行记录
+      if: always() && !cancelled()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+        cutoff_epoch="$(date -u -d '30 days ago' +%s)"
+
+        gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=100" \
+          --jq '.workflows[].id' |
+        while read -r workflow_id; do
+          [ -n "$workflow_id" ] || continue
+
+          mapfile -t runs < <(
+            gh api --paginate \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?per_page=100" \
+              --jq '.workflow_runs[] | [.id, .created_at] | @tsv'
+          )
+
+          index=0
+          for row in "${runs[@]}"; do
+            index=$((index + 1))
+            [ "$index" -le 10 ] && continue
+
+            run_id="$(printf '%s\n' "$row" | cut -f1)"
+            created_at="$(printf '%s\n' "$row" | cut -f2)"
+            created_epoch="$(date -u -d "$created_at" +%s)"
+
+            if [ "$created_epoch" -lt "$cutoff_epoch" ]; then
+              echo "删除 Workflow 运行记录 ${run_id}（${created_at}）"
+              gh api -X DELETE \
+                "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" \
+                --silent
+            fi
+          done
+        done
+
+    - name: 清理旧 Releases
+      # 只有本轮固件已经成功创建 Release 后才做保留数量清理。
+      # 编译 / manifest / 配置留档任一步失败时都不触碰现有 Release。
+      if: steps.release-upload.conclusion == 'success' && !cancelled()
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+
+        # GitHub returns releases newest first, but sorting by created_at makes
+        # the retention rule explicit and independent of API ordering.
+        mapfile -t releases < <(
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            --jq '.[] | [.created_at, .id, .tag_name] | @tsv' |
+          sort -r
+        )
+
+        index=0
+        for row in "${releases[@]}"; do
+          index=$((index + 1))
+          [ "$index" -le 10 ] && continue
+
+          created_at="$(printf '%s\n' "$row" | cut -f1)"
+          release_id="$(printf '%s\n' "$row" | cut -f2)"
+          tag_name="$(printf '%s\n' "$row" | cut -f3-)"
+          echo "删除 Release ${tag_name}（${created_at}）"
+
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
+            --silent
+
+          # Match the previous action's delete_tags=true behavior.
+          gh api -X DELETE \
+            "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag_name}" \
+            --silent || true
+        done
+; then
+          echo "错误：编译依赖列表包含非法包名"
+          exit 1
+        fi
+
+        echo "准备安装 ${#build_deps[@]} 个编译依赖"
+        sudo -E apt-get -qq install "${build_deps[@]}"
         sudo -E apt-get -qq autoremove --purge
         sudo -E apt-get -qq clean
         sudo timedatectl set-timezone "$TZ"
