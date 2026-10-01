@@ -20,6 +20,16 @@ if grep -qiE '<!DOCTYPE html|<html[ >]' ./include/meson.mk; then
   exit 1
 fi
 
+# meson.mk 直接追踪 LEDE master 的单文件内容，无法用仓库 commit 精确表示。
+# 记录实际参与本轮构建的文件 SHA256，后续由 diy-part2 继续追加其他动态上游。
+meson_sha256="$(sha256sum ./include/meson.mk | awk '{print $1}')"
+[[ "$meson_sha256" =~ ^[0-9a-f]{64}$ ]] || {
+  echo "ERROR: include/meson.mk SHA256 无效：$meson_sha256" >&2
+  exit 1
+}
+printf 'upstream_meson_mk_sha256=%s\n' "$meson_sha256" > .sft1200-upstreams.env
+echo "上游快照：upstream_meson_mk_sha256=$meson_sha256"
+
 # 旧的 openssl-engine.mk 下载地址现在返回 HTML，而且当前完整构建并未使用该文件，
 # 因此不再注入这个失效文件。
 
