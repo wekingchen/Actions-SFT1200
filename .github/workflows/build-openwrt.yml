@@ -266,8 +266,21 @@ jobs:
           echo "错误：编译依赖列表解析后为空"
           exit 1
         fi
-        if printf '%s\n' "${build_deps[@]}" |
-          grep -Eqv '^[A-Za-z0-9][A-Za-z0-9+.:~-]*
+        required_deps=(build-essential git python3 gcc-multilib)
+        for required_dep in "${required_deps[@]}"; do
+          if ! printf '%s\n' "${build_deps[@]}" | grep -Fxq "$required_dep"; then
+            echo "错误：编译依赖列表缺少关键依赖：$required_dep"
+            exit 1
+          fi
+        done
+
+        echo "准备安装 ${#build_deps[@]} 个编译依赖"
+        sudo -E apt-get -qq install "${build_deps[@]}"
+        sudo -E apt-get -qq autoremove --purge
+        sudo -E apt-get -qq clean
+        sudo timedatectl set-timezone "$TZ"
+        sudo chown $USER:$GROUPS $GITHUB_WORKSPACE
+
     - name: 克隆并生成 Siflower 源码
       working-directory: ./
       run: |
