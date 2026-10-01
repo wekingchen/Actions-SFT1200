@@ -271,6 +271,10 @@ jobs:
                   "diy-part2 缺少动态上游追溯文件")
           require(".sft1200-upstreams.env" in archive_config,
                   "配置留档未并入动态上游追溯信息")
+          require("upstream_meson_mk_sha256" in diy1,
+                  "diy-part1 未记录 LEDE meson.mk SHA256")
+          require("upstream_meson_mk_sha256" in diy2,
+                  "diy-part2 未校验并保留 meson.mk SHA256")
           for upstream_key in (
               "upstream_golang_commit",
               "upstream_aliyundrive_webdav_commit",
@@ -307,9 +311,12 @@ jobs:
               "diffconfig.txt",
               "config-changes.diff",
               "build-info.txt",
+              "feed-commits.txt",
               "README.txt",
           ):
               require(required in archive_config, f"配置留档工具缺少 {required}")
+          require("FEED_COMMITS_FILE" in build and "/tmp/sft1200-feed-commits.txt" in build,
+                  "配置留档未接入 feeds commit 明细")
 
           # 固件分发必须经过 manifest / 配置留档 / 附件准备验收。
           # 这里按具体 step 提取条件并逐项检查，不依赖条件顺序、空格或换行。
@@ -978,6 +985,7 @@ jobs:
       if: steps.manifest.outputs.status == 'success'
       env:
         FEED_FINGERPRINT: ${{ steps.feed-cache.outputs.hash }}
+        FEED_COMMITS_FILE: /tmp/sft1200-feed-commits.txt
         PWPACKAGES_COMMIT: ${{ needs.preflight.outputs.pwpackages_commit }}
         BUILD_CACHE_FINGERPRINT: ${{ steps.build-cache.outputs.hash }}
       run: |
