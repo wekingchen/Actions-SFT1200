@@ -266,6 +266,22 @@ jobs:
           require(".sft1200-naiveproxy.env" in archive_config,
                   "配置留档未记录 NaiveProxy 追溯元数据")
 
+          # diy-part2 直接追踪的动态上游必须记录实际 commit，便于跨构建追溯。
+          require(".sft1200-upstreams.env" in diy2,
+                  "diy-part2 缺少动态上游追溯文件")
+          require(".sft1200-upstreams.env" in archive_config,
+                  "配置留档未并入动态上游追溯信息")
+          for upstream_key in (
+              "upstream_golang_commit",
+              "upstream_aliyundrive_webdav_commit",
+              "upstream_lede_commit",
+              "upstream_luci_app_adguardhome_commit",
+          ):
+              require(upstream_key in diy2,
+                      f"diy-part2 缺少动态上游记录：{upstream_key}")
+          require("record_upstream" in diy2,
+                  "diy-part2 缺少统一的动态上游记录函数")
+
           naive_meta_step = get_step(preflight, "获取 NaiveProxy 官方 digest")
           require("GH_TOKEN:" in naive_meta_step and "github.token" in naive_meta_step,
                   "NaiveProxy 元数据查询没有使用 Preflight 只读 token")
