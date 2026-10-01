@@ -54,6 +54,7 @@ jobs:
       naiveproxy_asset: ${{ steps.naiveproxy-metadata.outputs.asset }}
       naiveproxy_sha256: ${{ steps.naiveproxy-metadata.outputs.sha256 }}
       naiveproxy_url: ${{ steps.naiveproxy-metadata.outputs.url }}
+      pwpackages_commit: ${{ steps.naiveproxy-metadata.outputs.pwpackages_commit }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@v7
@@ -256,6 +257,16 @@ jobs:
                   "NaiveProxy 元数据查询没有使用 Preflight 只读 token")
           require("resolve-naiveproxy-release.py" in naive_meta_step,
                   "Preflight 未调用 NaiveProxy resolver")
+          require("pwpackages_commit" in naive_meta_step and "git -C" in naive_meta_step,
+                  "Preflight 未记录 PWpackages 源码快照")
+
+          pwpackages_snapshot_step = get_step(build, "固定 Passwall Packages 构建快照")
+          require("needs.preflight.outputs.pwpackages_commit" in pwpackages_snapshot_step,
+                  "build 未消费 Preflight 的 PWpackages commit")
+          require("checkout --detach" in pwpackages_snapshot_step,
+                  "build 未固定 PWpackages 源码快照")
+          require("cat-file -e" in pwpackages_snapshot_step and "fetch --depth=1" in pwpackages_snapshot_step,
+                  "PWpackages 浅克隆缺少按 commit 补取逻辑")
 
           # 成功构建必须留下可追溯的最终配置记录。
           require("生成最终配置留档" in build, "缺少最终配置留档步骤")
@@ -365,6 +376,10 @@ jobs:
           git clone --depth=1 --branch main \
             https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git \
             "$metadata_dir"
+          pwpackages_commit="$(git -C "$metadata_dir" rev-parse HEAD)"
+          printf 'pwpackages_commit=%s\n' "$pwpackages_commit" >> "$GITHUB_OUTPUT"
+          echo "锁定本轮 Passwall packages 快照：$pwpackages_commit"
+
           python3 scripts/resolve-naiveproxy-release.py \
             --makefile "$metadata_dir/naiveproxy/Makefile" \
             --arch mipsel_24kc-static \
@@ -523,6 +538,35 @@ jobs:
 
     - name: 更新 Feeds
       run: cd openwrt/openwrt-18.06/siflower/openwrt-18.06 && ./scripts/feeds update -a
+
+    - name: 固定 Passwall Packages 构建快照
+      env:
+        PWPACKAGES_COMMIT: ${{ needs.preflight.outputs.pwpackages_commit }}
+      run: |
+        set -Eeuo pipefail
+        feed_dir="openwrt/openwrt-18.06/siflower/openwrt-18.06/feeds/PWpackages"
+
+        [[ "$PWPACKAGES_COMMIT" =~ ^[0-9a-f]{40}$ ]] || {
+          echo "错误：Preflight 返回的 PWpackages commit 非法：$PWPACKAGES_COMMIT" >&2
+          exit 1
+        }
+        [ -d "$feed_dir/.git" ] || {
+          echo "错误：PWpackages feed 不存在：$feed_dir" >&2
+          exit 1
+        }
+
+        if ! git -C "$feed_dir" cat-file -e "$PWPACKAGES_COMMIT^{commit}" 2>/dev/null; then
+          echo "当前 feed 浅克隆不包含目标 commit，按 SHA 获取本轮快照"
+          git -C "$feed_dir" fetch --depth=1 origin "$PWPACKAGES_COMMIT"
+        fi
+
+        git -C "$feed_dir" checkout --detach "$PWPACKAGES_COMMIT"
+        actual_commit="$(git -C "$feed_dir" rev-parse HEAD)"
+        [ "$actual_commit" = "$PWPACKAGES_COMMIT" ] || {
+          echo "错误：PWpackages 快照固定失败：expected=$PWPACKAGES_COMMIT actual=$actual_commit" >&2
+          exit 1
+        }
+        echo "PWpackages 本轮构建快照：$actual_commit"
 
     - name: 计算 Feeds 缓存指纹
       id: feed-cache
