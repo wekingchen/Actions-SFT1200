@@ -48,9 +48,17 @@ jobs:
   preflight:
     name: 构建前快速预检
     runs-on: ubuntu-22.04
+    outputs:
+      naiveproxy_version: ${{ steps.naiveproxy-metadata.outputs.version }}
+      naiveproxy_release: ${{ steps.naiveproxy-metadata.outputs.release }}
+      naiveproxy_asset: ${{ steps.naiveproxy-metadata.outputs.asset }}
+      naiveproxy_sha256: ${{ steps.naiveproxy-metadata.outputs.sha256 }}
+      naiveproxy_url: ${{ steps.naiveproxy-metadata.outputs.url }}
     steps:
       - name: 检出仓库
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: 静态预检
         shell: bash
@@ -89,7 +97,7 @@ jobs:
           bash -n "$DIY_P1_SH"
           bash -n "$DIY_P2_SH"
           bash -n scripts/archive-config.sh
-          python3 -m py_compile scripts/patch-gen-config.py
+          python3 -m py_compile scripts/patch-gen-config.py scripts/resolve-naiveproxy-release.py
 
           echo "检查项目级兼容约束"
           python3 - <<'PY'
@@ -102,23 +110,26 @@ jobs:
           diy2 = Path("diy-part2.sh").read_text()
           archive_config = Path("scripts/archive-config.sh").read_text()
           patch_gen_config = Path("scripts/patch-gen-config.py").read_text()
+          resolve_naiveproxy = Path("scripts/resolve-naiveproxy-release.py").read_text()
           config = Path(".config").read_text()
 
-          # 只检查 build job 正文，避免 Preflight 自己的断言字符串造成自命中。
-          marker = "\n  build:\n"
-          if marker not in workflow:
-              raise SystemExit("预检错误：找不到 build job")
-          preflight, build = workflow.split(marker, 1)
+          # 分离具体 job，避免安全断言误扫到其他 job 或 Preflight 自身文本。
+          build_marker = "\n  build:\n"
+          release_marker = "\n  release:\n"
+          if build_marker not in workflow or release_marker not in workflow:
+              raise SystemExit("预检错误：找不到 build / release job")
+          preflight, remainder = workflow.split(build_marker, 1)
+          build, release = remainder.split(release_marker, 1)
 
           def require(condition, message):
               if not condition:
                   raise SystemExit(f"预检错误：{message}")
 
-          def get_step(name):
+          def get_step(job, name):
               pattern = re.compile(
                   rf"(?ms)^    - name: {re.escape(name)}\n(?P<body>.*?)(?=^    - name: |\Z)"
               )
-              match = pattern.search(build)
+              match = pattern.search(job)
               require(match is not None, f"找不到 workflow step：{name}")
               return " ".join(match.group("body").split())
 
@@ -130,16 +141,29 @@ jobs:
           require(0 <= name_pos < setup_pos, "Git author name 没有在 setup.py 前设置")
           require(0 <= email_pos < setup_pos, "Git author email 没有在 setup.py 前设置")
 
-          # 权限遵循最小权限原则：Preflight 只读，只有 build job 可以写 Actions / Contents。
+          # 权限隔离：preflight/build 只读；只有不执行第三方构建代码的 release job 可以写。
           workflow_header = workflow.split("\njobs:\n", 1)[0]
           require("permissions:\n  contents: read\n" in workflow_header,
                   "workflow 顶层 permissions 不是 contents: read")
           require("actions: write" not in workflow_header and "contents: write" not in workflow_header,
                   "workflow 顶层仍授予写权限")
+          require("permissions:\n      contents: read\n" in build,
+                  "build job 不是 contents: read")
+          require("actions: write" not in build and "contents: write" not in build,
+                  "build job 仍持有写权限")
           require(
-              "permissions:\n      actions: write\n      contents: write\n" in build,
-              "build job 缺少 actions: write / contents: write",
+              "permissions:\n      actions: write\n      contents: write\n" in release,
+              "release job 缺少 actions: write / contents: write",
           )
+
+          preflight_checkout = get_step(preflight, "检出仓库")
+          build_checkout = get_step(build, "检出仓库")
+          require("persist-credentials: false" in preflight_checkout,
+                  "Preflight checkout 仍持久化 GitHub 凭据")
+          require("persist-credentials: false" in build_checkout,
+                  "build checkout 仍持久化 GitHub 凭据")
+          require("secrets.GITHUB_TOKEN" not in build and "github.token" not in build,
+                  "build job 仍直接持有 GitHub token")
 
           # hostpkg 的 LD_LIBRARY_PATH 只能局部提供给 make，不能跨步骤污染宿主工具。
           require('echo "LD_LIBRARY_PATH=' not in diy2,
@@ -204,27 +228,32 @@ jobs:
               require(required in patch_gen_config,
                       f"gen_config 补丁脚本缺少关键兼容项：{required}")
 
-          # NaiveProxy 必须使用 GitHub Release 官方 digest 校验，不能下载后自生成 PKG_HASH。
-          require(
-              "api.github.com/repos/klzgrad/naiveproxy/releases/tags/" in diy2,
-              "NaiveProxy 未读取 GitHub Release 元数据",
-          )
-          require('item.get("digest")' in diy2,
-                  "NaiveProxy 未读取 Release asset digest")
+          # NaiveProxy Release API 只允许在只读 Preflight 中查询；
+          # build 只消费 digest/URL，不得持有 GitHub token。
+          require("api.github.com/repos/klzgrad/naiveproxy/releases/tags/" in resolve_naiveproxy,
+                  "NaiveProxy resolver 未读取 GitHub Release 元数据")
+          require('item.get("digest")' in resolve_naiveproxy,
+                  "NaiveProxy resolver 未读取 Release asset digest")
+          require("NAIVEPROXY_META_SHA256" in diy2 and "NAIVEPROXY_META_URL" in diy2,
+                  "diy-part2 未消费 Preflight 的 NaiveProxy 元数据")
+          require("GH_TOKEN" not in diy2 and "GITHUB_TOKEN" not in diy2,
+                  "diy-part2 仍尝试读取 GitHub token")
           require("NaiveProxy SHA256 verified by GitHub Release digest" in diy2,
                   "NaiveProxy 缺少官方 digest 强校验")
           require('if [ "$actual_sha" != "$expected_sha" ]' in diy2,
                   "NaiveProxy 下载内容没有与官方 digest 强制比较")
           require('sha256="$(sha256sum "$archive"' not in diy2,
                   "NaiveProxy 仍使用下载结果自生成 PKG_HASH")
-          require(
-              "GH_TOKEN:" in build and "secrets.GITHUB_TOKEN" in build,
-              "NaiveProxy Release API 未使用 Actions token，容易触发匿名限流",
-          )
           require(".sft1200-naiveproxy.env" in diy2,
                   "NaiveProxy 缺少构建追溯元数据")
           require(".sft1200-naiveproxy.env" in archive_config,
                   "配置留档未记录 NaiveProxy 追溯元数据")
+
+          naive_meta_step = get_step(preflight, "获取 NaiveProxy 官方 digest")
+          require("GH_TOKEN:" in naive_meta_step and "github.token" in naive_meta_step,
+                  "NaiveProxy 元数据查询没有使用 Preflight 只读 token")
+          require("resolve-naiveproxy-release.py" in naive_meta_step,
+                  "Preflight 未调用 NaiveProxy resolver")
 
           # 成功构建必须留下可追溯的最终配置记录。
           require("生成最终配置留档" in build, "缺少最终配置留档步骤")
@@ -241,11 +270,11 @@ jobs:
 
           # 固件分发必须经过 manifest / 配置留档 / 附件准备验收。
           # 这里按具体 step 提取条件并逐项检查，不依赖条件顺序、空格或换行。
-          bin_upload_step = get_step("上传完整 bin 目录")
-          release_assets_step = get_step("准备 Release 附件")
-          tag_step = get_step("生成 Release 标签")
-          release_step = get_step("发布固件到 Release")
-          release_cleanup_step = get_step("清理旧 Releases")
+          bin_upload_step = get_step(build, "上传完整 bin 目录")
+          release_assets_step = get_step(build, "准备 Release 附件")
+          release_bundle_step = get_step(build, "上传 Release 交接包")
+          release_step = get_step(release, "发布固件到 Release")
+          release_cleanup_step = get_step(release, "清理旧 Releases")
 
           for token in (
               "steps.manifest.outputs.status == 'success'",
@@ -263,33 +292,23 @@ jobs:
               require(token in release_assets_step,
                       f"Release 附件准备缺少 gate：{token}")
 
-          for token in (
-              "steps.compile.outputs.status == 'success'",
-              "steps.manifest.outputs.status == 'success'",
-              "steps.config-record.outputs.status == 'success'",
-              "steps.release-assets.outputs.status == 'success'",
-              "env.UPLOAD_RELEASE == 'true'",
-          ):
-              require(token in tag_step,
-                      f"Release tag 缺少 gate：{token}")
-
-          for token in (
-              "steps.compile.outputs.status == 'success'",
-              "steps.manifest.outputs.status == 'success'",
-              "steps.config-record.outputs.status == 'success'",
-              "steps.release-assets.outputs.status == 'success'",
-              "steps.tag.outputs.status == 'success'",
-          ):
-              require(token in release_step,
-                      f"Release 上传缺少 gate：{token}")
-
+          require("actions/upload-artifact@v7" in release_bundle_step,
+                  "build 未通过 Artifact 交接 Release 附件")
+          require("release-bundle" in release_bundle_step,
+                  "Release 交接包路径异常")
+          require("actions/download-artifact@v8" in release,
+                  "release job 未下载 build 交接包")
+          require("softprops/action-gh-release" not in release,
+                  "release job 仍把写 token 交给第三方 Release Action")
+          require("gh release create" in release_step,
+                  "release job 未使用 gh CLI 发布 Release")
+          require("GH_TOKEN:" in release_step and "secrets.GITHUB_TOKEN" in release_step,
+                  "Release 发布步骤缺少写 token")
           require('find "$firmware_root" -type f -name \'openwrt-*squashfs*\'' in release_assets_step,
                   "Release 附件未从真实 target 目录动态发现固件")
-          require("release-assets/*" in release_step,
-                  "Release 未使用统一 staging 目录上传附件")
-          require("bin/targets/siflower/" + "*/openwrt-*squashfs*" not in release_step,
-                  "Release 仍硬编码错误的子目录层级")
-          require("steps.release-upload.conclusion == 'success'" in release_cleanup_step,
+          require("release-bundle/assets" in release_assets_step,
+                  "Release 附件未进入交接目录")
+          require("steps.release-upload.outputs.status == 'success'" in release_cleanup_step,
                   "旧 Release 清理没有绑定本轮 Release 成功状态")
           require("!cancelled()" in release_cleanup_step,
                   "旧 Release 清理缺少 cancelled() 保护")
@@ -333,14 +352,31 @@ jobs:
           print("静态预检通过")
           PY
 
+      - name: 获取 NaiveProxy 官方 digest
+        id: naiveproxy-metadata
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          metadata_dir="$RUNNER_TEMP/openwrt-passwall-packages"
+          rm -rf "$metadata_dir"
+          git clone --depth=1 --branch main \
+            https://github.com/Openwrt-Passwall/openwrt-passwall-packages.git \
+            "$metadata_dir"
+          python3 scripts/resolve-naiveproxy-release.py \
+            --makefile "$metadata_dir/naiveproxy/Makefile" \
+            --arch mipsel_24kc-static \
+            --github-output "$GITHUB_OUTPUT"
+
   build:
     name: 编译 SFT1200 固件
     needs: preflight
     runs-on: ubuntu-22.04
     timeout-minutes: 120
     permissions:
-      actions: write
-      contents: write
+      contents: read
+    outputs:
+      release_ready: ${{ steps.release-assets.outputs.status }}
 
     steps:
     - name: 磁盘清理前状态
@@ -391,6 +427,8 @@ jobs:
 
     - name: 检出仓库
       uses: actions/checkout@v7
+      with:
+        persist-credentials: false
 
     - name: 初始化编译环境
       env:
@@ -514,7 +552,11 @@ jobs:
     - name: 加载并应用自定义配置
       id: custom-config
       env:
-        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        NAIVEPROXY_META_VERSION: ${{ needs.preflight.outputs.naiveproxy_version }}
+        NAIVEPROXY_META_RELEASE: ${{ needs.preflight.outputs.naiveproxy_release }}
+        NAIVEPROXY_META_ASSET: ${{ needs.preflight.outputs.naiveproxy_asset }}
+        NAIVEPROXY_META_SHA256: ${{ needs.preflight.outputs.naiveproxy_sha256 }}
+        NAIVEPROXY_META_URL: ${{ needs.preflight.outputs.naiveproxy_url }}
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
 
@@ -930,12 +972,15 @@ jobs:
     - name: 准备 Release 附件
       id: release-assets
       if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+      env:
+        COWTRANSFER_URL: ${{ steps.cowtransfer.outputs.url }}
+        WETRANSFER_URL: ${{ steps.wetransfer.outputs.url }}
       run: |
         set -Eeuo pipefail
 
         firmware_root="openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower"
-        rm -rf release-assets
-        mkdir -p release-assets
+        rm -rf release-bundle
+        mkdir -p release-bundle/assets
 
         mapfile -d '' -t firmware_files < <(
           find "$firmware_root" -type f -name 'openwrt-*squashfs*' -print0 |
@@ -950,7 +995,7 @@ jobs:
         echo "准备发布 ${#firmware_files[@]} 个固件文件："
         for file in "${firmware_files[@]}"; do
           echo "  - $file"
-          cp -f "$file" release-assets/
+          cp -f "$file" release-bundle/assets/
         done
 
         mapfile -t config_files < <(find config-record -maxdepth 1 -type f -print | sort)
@@ -958,34 +1003,82 @@ jobs:
           echo "错误：config-record 为空" >&2
           exit 1
         fi
-        cp -f "${config_files[@]}" release-assets/
+        cp -f "${config_files[@]}" release-bundle/assets/
+
+        {
+          echo "SFT1200 自动构建固件。"
+          if [ "$UPLOAD_COWTRANSFER" = true ] && [ -n "$COWTRANSFER_URL" ]; then
+            printf '\n🔗 [CowTransfer](%s)\n' "$COWTRANSFER_URL"
+          fi
+          if [ "$UPLOAD_WETRANSFER" = true ] && [ -n "$WETRANSFER_URL" ]; then
+            printf '\n🔗 [WeTransfer](%s)\n' "$WETRANSFER_URL"
+          fi
+        } > release-bundle/release.txt
 
         echo "Release 附件清单："
-        find release-assets -maxdepth 1 -type f -printf '  - %f\n' | sort
+        find release-bundle/assets -maxdepth 1 -type f -printf '  - %f\n' | sort
         echo "status=success" >> "$GITHUB_OUTPUT"
 
-    - name: 生成 Release 标签
-      id: tag
-      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && env.UPLOAD_RELEASE == 'true' && !cancelled()
+    - name: 上传 Release 交接包
+      id: release-bundle-upload
+      if: steps.release-assets.outputs.status == 'success'
+      uses: actions/upload-artifact@v7
+      with:
+        name: SFT1200_release_bundle_${{ github.run_id }}
+        path: release-bundle
+        if-no-files-found: error
+        retention-days: 1
+        compression-level: 0
+
+
+  release:
+    name: 发布 SFT1200 固件
+    needs: build
+    if: needs.build.result == 'success' && needs.build.outputs.release_ready == 'success'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      actions: write
+      contents: write
+
+    steps:
+    - name: 下载 Release 交接包
+      uses: actions/download-artifact@v8
+      with:
+        name: SFT1200_release_bundle_${{ github.run_id }}
+        path: release-bundle
+
+    - name: 校验 Release 交接包
       run: |
-        echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_OUTPUT
-        touch release.txt
-        [ $UPLOAD_COWTRANSFER = true ] && echo "🔗 [Cowtransfer](${{ steps.cowtransfer.outputs.url }})" >> release.txt
-        [ $UPLOAD_WETRANSFER = true ] && echo "🔗 [WeTransfer](${{ steps.wetransfer.outputs.url }})" >> release.txt
-        echo "status=success" >> $GITHUB_OUTPUT
+        set -Eeuo pipefail
+        [ -s release-bundle/release.txt ] || {
+          echo "错误：Release 说明文件缺失" >&2
+          exit 1
+        }
+        mapfile -t assets < <(find release-bundle/assets -maxdepth 1 -type f -print | sort)
+        [ "${#assets[@]}" -gt 0 ] || {
+          echo "错误：Release 交接包没有附件" >&2
+          exit 1
+        }
+        find release-bundle/assets -maxdepth 1 -type f -printf '  - %f\n' | sort
 
     - name: 发布固件到 Release
       id: release-upload
-      uses: softprops/action-gh-release@v3
-      if: steps.compile.outputs.status == 'success' && steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && steps.tag.outputs.status == 'success' && !cancelled()
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.tag.outputs.release_tag }}
-        body_path: release.txt
-        files: |
-          release-assets/*
-        fail_on_unmatched_files: true
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -Eeuo pipefail
+        release_tag="$(date +"%Y.%m.%d-%H%M")"
+        mapfile -t assets < <(find release-bundle/assets -maxdepth 1 -type f -print | sort)
+
+        gh release create "$release_tag" "${assets[@]}" \
+          --repo "$GITHUB_REPOSITORY" \
+          --target "$GITHUB_SHA" \
+          --title "$release_tag" \
+          --notes-file release-bundle/release.txt
+
+        echo "发布完成：$release_tag"
+        echo "status=success" >> "$GITHUB_OUTPUT"
 
     - name: 清理旧 Workflow 运行记录
       if: always() && !cancelled()
@@ -1025,16 +1118,12 @@ jobs:
         done
 
     - name: 清理旧 Releases
-      # 只有本轮固件已经成功创建 Release 后才做保留数量清理。
-      # 编译 / manifest / 配置留档任一步失败时都不触碰现有 Release。
-      if: steps.release-upload.conclusion == 'success' && !cancelled()
+      if: steps.release-upload.outputs.status == 'success' && !cancelled()
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         set -Eeuo pipefail
 
-        # GitHub returns releases newest first, but sorting by created_at makes
-        # the retention rule explicit and independent of API ordering.
         mapfile -t releases < <(
           gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
             --jq '.[] | [.created_at, .id, .tag_name] | @tsv' |
@@ -1055,7 +1144,6 @@ jobs:
             "repos/${GITHUB_REPOSITORY}/releases/${release_id}" \
             --silent
 
-          # Match the previous action's delete_tags=true behavior.
           gh api -X DELETE \
             "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag_name}" \
             --silent || true
