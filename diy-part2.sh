@@ -74,7 +74,8 @@ config_disable() {
 
 configure_naiveproxy() {
   local makefile="feeds/PWpackages/naiveproxy/Makefile"
-  local version release tag asset url archive sha256
+  local version release tag asset url archive sha256 api_url api_json asset_meta expected_sha actual_sha auth_token
+  local -a api_headers
 
   [ -f "$makefile" ] || die "NaiveProxy Makefile not found: $makefile"
 
@@ -86,20 +87,94 @@ configure_naiveproxy() {
 
   tag="v${version}-${release}"
   asset="naiveproxy-${tag}-openwrt-${NAIVEPROXY_ARCH}.tar.xz"
-  url="https://github.com/klzgrad/naiveproxy/releases/download/${tag}/${asset}"
   archive="dl/${asset}"
+  api_url="https://api.github.com/repos/klzgrad/naiveproxy/releases/tags/${tag}"
+  api_json="$(mktemp)"
+  auth_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
 
   echo "NaiveProxy: version=${version}, release=${release}, arch=${NAIVEPROXY_ARCH}"
-  download_cached "$url" "$archive"
+  echo "读取 GitHub Release 官方 digest：$api_url"
 
-  # 计算 HASH 前先确认下载内容确实是可解压的 xz 包，避免把错误页写成 HASH。
+  api_headers=(
+    -H "Accept: application/vnd.github+json"
+    -H "X-GitHub-Api-Version: 2022-11-28"
+  )
+  if [ -n "$auth_token" ]; then
+    api_headers+=(-H "Authorization: Bearer $auth_token")
+  fi
+
+  if ! curl -fsSL --retry 4 --retry-delay 2 --retry-all-errors \
+    "${api_headers[@]}" "$api_url" -o "$api_json"; then
+    rm -f "$api_json"
+    die "Unable to read NaiveProxy release metadata: $tag"
+  fi
+
+  if ! asset_meta="$(
+    python3 - "$api_json" "$asset" <<'PY'
+from pathlib import Path
+import json
+import re
+import sys
+
+metadata = json.loads(Path(sys.argv[1]).read_text())
+asset_name = sys.argv[2]
+matches = [item for item in metadata.get("assets", []) if item.get("name") == asset_name]
+
+if len(matches) != 1:
+    raise SystemExit(
+        f"Expected exactly one NaiveProxy release asset {asset_name!r}, found {len(matches)}"
+    )
+
+item = matches[0]
+digest = item.get("digest")
+url = item.get("browser_download_url")
+
+if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
+    raise SystemExit(f"NaiveProxy asset has no usable GitHub SHA256 digest: {digest!r}")
+if not isinstance(url, str) or not url.startswith("https://github.com/klzgrad/naiveproxy/releases/download/"):
+    raise SystemExit(f"Unexpected NaiveProxy asset URL: {url!r}")
+
+print(digest.split(":", 1)[1].lower())
+print(url)
+PY
+  )"; then
+    rm -f "$api_json"
+    die "Unable to verify NaiveProxy release metadata: $asset"
+  fi
+  rm -f "$api_json"
+
+  expected_sha="$(printf '%s\n' "$asset_meta" | sed -n '1p')"
+  url="$(printf '%s\n' "$asset_meta" | sed -n '2p')"
+  [ -n "$expected_sha" ] || die "NaiveProxy official digest is empty: $asset"
+  [ -n "$url" ] || die "NaiveProxy official asset URL is empty: $asset"
+
+  if [ -s "$archive" ]; then
+    actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+    if [ "$actual_sha" = "$expected_sha" ]; then
+      echo "Reuse verified NaiveProxy cache: $archive"
+    else
+      echo "Cached NaiveProxy digest mismatch; redownloading: $archive"
+      rm -f "$archive"
+    fi
+  fi
+
+  if [ ! -s "$archive" ]; then
+    download_cached "$url" "$archive"
+  fi
+
+  actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
+  if [ "$actual_sha" != "$expected_sha" ]; then
+    rm -f "$archive"
+    die "NaiveProxy SHA256 mismatch: expected=$expected_sha actual=$actual_sha"
+  fi
+
   if ! tar -tJf "$archive" >/dev/null 2>&1; then
     rm -f "$archive"
     die "Invalid NaiveProxy release archive: $asset"
   fi
 
-  sha256="$(sha256sum "$archive" | awk '{print $1}')"
-  echo "NaiveProxy SHA256: $sha256"
+  sha256="$expected_sha"
+  echo "NaiveProxy SHA256 verified by GitHub Release digest: $sha256"
 
   python3 - "$makefile" "$NAIVEPROXY_ARCH" "$sha256" <<'PY'
 from pathlib import Path
@@ -175,6 +250,15 @@ text = text.replace(
 
 path.write_text(text)
 PY
+
+  cat > .sft1200-naiveproxy.env <<EOF
+naiveproxy_version=${version}
+naiveproxy_release=${release}
+naiveproxy_arch=${NAIVEPROXY_ARCH}
+naiveproxy_asset=${asset}
+naiveproxy_sha256=${sha256}
+naiveproxy_digest_source=github-release-api
+EOF
 }
 
 
