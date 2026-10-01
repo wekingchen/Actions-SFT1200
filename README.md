@@ -18,7 +18,7 @@
 
 - Passwall UI 与 Passwall packages 跟随上游 main。
 - 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，并同时记录当时的 `openwrt-passwall-packages` HEAD。build job 在 `feeds update` 后把 `feeds/PWpackages` 固定到同一 commit，并用 `feeds update -i PWpackages` 仅重建索引，再消费对应的版本/资产/digest，避免 Preflight 与 build 两次拉取 main 之间发生源码与 feed 索引竞态。若目标 Release 资产没有 GitHub 提供的 SHA256 digest，则构建直接失败，不降级为“下载后自算 hash”。
-- 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件；对 `diy-part2.sh` 直接追踪的 golang、aliyundrive-webdav、LEDE（ninja/adbyby）和 luci-app-adguardhome，记录每次实际 clone 到的 commit，不锁版本但保留完整追溯信息。
+- 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件；对直接追踪的动态来源完整留档：`diy-part1.sh` 下载的 LEDE `meson.mk` 记录实际 SHA256，`diy-part2.sh` clone 的 golang、aliyundrive-webdav、LEDE（ninja/adbyby）和 luci-app-adguardhome 记录实际 commit；均不锁版本，只补充可追溯性。
 - 隔离现代 LuCI 的 `luci-compat / luci-lua-runtime / ucode` 依赖，继续使用 18.06 原生 Lua LuCI。
 - 固定使用 OpenWrt 18.06 官方 miniupnpd，避免现代 nftables 变种污染旧 Kconfig。
 - 修复 OpenWrt 18.06 CMake 与 ccache 在现代构建环境中的兼容问题。
@@ -81,7 +81,8 @@
 - `final.config`：经过 `diy-part2.sh`、`make defconfig` 后，本次固件真正使用的最终 `.config`。
 - `diffconfig.txt`：OpenWrt `scripts/diffconfig.sh` 的输出，只保留相对默认配置真正有意义的选项；人工复核和迁移时优先看它。
 - `config-changes.diff`：按 `CONFIG_*` symbol 比较 `repository.config` 与 `final.config` 的语义差异，忽略纯排序变化。
-- `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、PWpackages 构建快照 commit、diy-part2 动态上游 commit、build cache 指纹、最终 `.config` SHA256，以及 NaiveProxy 实际版本、资产名与经 GitHub Release digest 验证的 SHA256。
+- `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、PWpackages 构建快照 commit、动态上游 commit / SHA256、build cache 指纹、最终 `.config` SHA256，以及 NaiveProxy 实际版本、资产名与经 GitHub Release digest 验证的 SHA256。
+- `feed-commits.txt`：记录本轮各 feed 实际 HEAD commit；当 `feed_fingerprint` 变化时，用它直接定位是 packages2、luci2、helloworld、PWluci 等哪个 feed 发生变化。
 - `README.txt`：Artifact 内置使用说明；即使以后只下载到这一份留档，也能知道每个文件的用途。
 
 ### 如何用 `build-info.txt` 排查上游变化
@@ -92,11 +93,12 @@
 
 - `source_commit`：本仓库当次构建使用的 commit。先确认问题是否来自本仓库自身改动。
 - `pwpackages_commit`：本轮实际参与构建的 `Openwrt-Passwall/openwrt-passwall-packages` 快照。
+- `upstream_meson_mk_sha256`：`diy-part1.sh` 从 LEDE master 下载的 `include/meson.mk` 实际文件 SHA256。
 - `upstream_golang_commit`：`sbwml/packages_lang_golang` 实际 clone 到的 commit。
 - `upstream_aliyundrive_webdav_commit`：`messense/aliyundrive-webdav` 实际 clone 到的 commit。
 - `upstream_lede_commit`：`coolsnowwolf/lede` 实际 clone 到的 commit；当前同时对应引入的 `tools/ninja` 与 `adbyby`。
 - `upstream_luci_app_adguardhome_commit`：`kongfl888/luci-app-adguardhome` 实际 clone 到的 commit。
-- `feed_fingerprint`：本轮所有 feeds HEAD 的组合指纹；不同通常意味着至少一个 feed 发生变化。
+- `feed_fingerprint`：本轮所有 feeds HEAD 的组合指纹；不同说明至少一个 feed 发生变化。此时继续比较同目录的 `feed-commits.txt`，即可定位具体 feed。
 - `naiveproxy_version` / `naiveproxy_release` / `naiveproxy_asset` / `naiveproxy_sha256`：NaiveProxy 实际版本与经 GitHub Release digest 验证的资产信息。
 - `final_config_sha256`：本轮最终 `.config` 指纹。若上游 commit 相同但它发生变化，再检查 `config-changes.diff` 与 `diffconfig.txt`。
 
@@ -106,14 +108,16 @@
 diff -u \
   <(grep -E '^(source_commit|pwpackages_commit|upstream_|feed_fingerprint|naiveproxy_|final_config_sha256)=' old/build-info.txt) \
   <(grep -E '^(source_commit|pwpackages_commit|upstream_|feed_fingerprint|naiveproxy_|final_config_sha256)=' new/build-info.txt)
+
+diff -u old/feed-commits.txt new/feed-commits.txt
 ```
 
 判断顺序建议：
 
 1. 先看 `source_commit` 是否变化。
-2. 如果本仓库 commit 相同，再看 `pwpackages_commit` 和四个 `upstream_*_commit`。
-3. 如果这些 commit 都相同，再看 `feed_fingerprint`、NaiveProxy 信息和最终配置指纹。
-4. 如果上游和配置都没变化，再回到 Actions 日志检查 Runner、下载、缓存或工具链环境差异。
+2. 如果本仓库 commit 相同，再看 `pwpackages_commit`、`upstream_meson_mk_sha256` 和四个动态仓库 commit。
+3. 如果 `feed_fingerprint` 不同，直接比较 `feed-commits.txt`，定位具体发生变化的 feed；再看 NaiveProxy 信息和最终配置指纹。
+4. 如果所有动态上游、feeds 和配置都没变化，再回到 Actions 日志检查 Runner、下载、缓存或工具链环境差异。
 
 这些 commit **只用于记录，不用于长期锁版本**；下一次构建仍然按当前追新策略获取最新上游。
 
