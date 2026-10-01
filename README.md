@@ -84,6 +84,39 @@
 - `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、PWpackages 构建快照 commit、diy-part2 动态上游 commit、build cache 指纹、最终 `.config` SHA256，以及 NaiveProxy 实际版本、资产名与经 GitHub Release digest 验证的 SHA256。
 - `README.txt`：Artifact 内置使用说明；即使以后只下载到这一份留档，也能知道每个文件的用途。
 
+### 如何用 `build-info.txt` 排查上游变化
+
+当出现“仓库代码没改但突然编译失败”、或者“新固件某个功能异常”时，优先下载**正常版本**和**异常版本**各自的 `config-record`，比较两份 `build-info.txt`。可以从 Actions 的 `OpenWrt_config_record...` Artifact 下载，也可以直接从对应 Release 下载同名文件。
+
+重点字段：
+
+- `source_commit`：本仓库当次构建使用的 commit。先确认问题是否来自本仓库自身改动。
+- `pwpackages_commit`：本轮实际参与构建的 `Openwrt-Passwall/openwrt-passwall-packages` 快照。
+- `upstream_golang_commit`：`sbwml/packages_lang_golang` 实际 clone 到的 commit。
+- `upstream_aliyundrive_webdav_commit`：`messense/aliyundrive-webdav` 实际 clone 到的 commit。
+- `upstream_lede_commit`：`coolsnowwolf/lede` 实际 clone 到的 commit；当前同时对应引入的 `tools/ninja` 与 `adbyby`。
+- `upstream_luci_app_adguardhome_commit`：`kongfl888/luci-app-adguardhome` 实际 clone 到的 commit。
+- `feed_fingerprint`：本轮所有 feeds HEAD 的组合指纹；不同通常意味着至少一个 feed 发生变化。
+- `naiveproxy_version` / `naiveproxy_release` / `naiveproxy_asset` / `naiveproxy_sha256`：NaiveProxy 实际版本与经 GitHub Release digest 验证的资产信息。
+- `final_config_sha256`：本轮最终 `.config` 指纹。若上游 commit 相同但它发生变化，再检查 `config-changes.diff` 与 `diffconfig.txt`。
+
+快速比较两次构建时，可以执行：
+
+```bash
+diff -u \
+  <(grep -E '^(source_commit|pwpackages_commit|upstream_|feed_fingerprint|naiveproxy_|final_config_sha256)=' old/build-info.txt) \
+  <(grep -E '^(source_commit|pwpackages_commit|upstream_|feed_fingerprint|naiveproxy_|final_config_sha256)=' new/build-info.txt)
+```
+
+判断顺序建议：
+
+1. 先看 `source_commit` 是否变化。
+2. 如果本仓库 commit 相同，再看 `pwpackages_commit` 和四个 `upstream_*_commit`。
+3. 如果这些 commit 都相同，再看 `feed_fingerprint`、NaiveProxy 信息和最终配置指纹。
+4. 如果上游和配置都没变化，再回到 Actions 日志检查 Runner、下载、缓存或工具链环境差异。
+
+这些 commit **只用于记录，不用于长期锁版本**；下一次构建仍然按当前追新策略获取最新上游。
+
 ### 什么时候需要更新仓库 `.config`
 
 正常情况下**不需要**因为一次成功构建就更新仓库 `.config`。只有当 `config-changes.diff` 显示的变化是我们明确希望长期保留的配置策略变化时，才建议提升新的基线：
