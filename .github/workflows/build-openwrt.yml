@@ -623,13 +623,15 @@ jobs:
           echo "::group::失败目标诊断重试"
 
           failed_target="$(
-            {
-              sed -nE 's/.*ERROR: (package\/[^[:space:]]+) failed to build.*/\1\/compile/p' build.log
-              grep -Eo 'package/[^[:space:]\]]+/compile' build.log || true
-            } |
-            sed 's/[[:punct:]]*$//' |
+            sed -nE 's/.*ERROR: (package\/[^[:space:]]+) failed to build.*/\1\/compile/p' build.log |
             tail -n 1
           )"
+          if [ -z "$failed_target" ]; then
+            failed_target="$(
+              grep -Eo 'package/[^[:space:]]+/compile' build.log |
+              tail -n 1 || true
+            )"
+          fi
 
           diagnostic_timeout="20m"
           set +e
