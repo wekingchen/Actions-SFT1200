@@ -708,8 +708,9 @@ jobs:
         tag_name: ${{ steps.tag.outputs.release_tag }}
         body_path: release.txt
         files: |
-          /home/runner/work/Actions-SFT1200/Actions-SFT1200/openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/openwrt-*squashfs*
-          /home/runner/work/Actions-SFT1200/Actions-SFT1200/config-record/*
+          openwrt/openwrt-18.06/siflower/openwrt-18.06/bin/targets/siflower/*/openwrt-*squashfs*
+          config-record/*
+        fail_on_unmatched_files: true
 
     - name: 清理旧 Workflow 运行记录
       if: always() && !cancelled()
