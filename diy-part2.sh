@@ -74,8 +74,8 @@ config_disable() {
 
 configure_naiveproxy() {
   local makefile="feeds/PWpackages/naiveproxy/Makefile"
-  local version release tag asset url archive sha256 api_url api_json asset_meta expected_sha actual_sha auth_token
-  local -a api_headers
+  local version release tag asset url archive sha256 expected_sha actual_sha meta_asset
+  local meta_version meta_release
 
   [ -f "$makefile" ] || die "NaiveProxy Makefile not found: $makefile"
 
@@ -88,65 +88,33 @@ configure_naiveproxy() {
   tag="v${version}-${release}"
   asset="naiveproxy-${tag}-openwrt-${NAIVEPROXY_ARCH}.tar.xz"
   archive="dl/${asset}"
-  api_url="https://api.github.com/repos/klzgrad/naiveproxy/releases/tags/${tag}"
-  api_json="$(mktemp)"
-  auth_token="${GH_TOKEN:-${GITHUB_TOKEN:-}}"
+
+  # GitHub Release API 查询已经在只读 Preflight job 中完成。
+  # build job 不持有 GitHub token，只消费经过校验的公开 Release 元数据。
+  meta_version="${NAIVEPROXY_META_VERSION:-}"
+  meta_release="${NAIVEPROXY_META_RELEASE:-}"
+  meta_asset="${NAIVEPROXY_META_ASSET:-}"
+  expected_sha="${NAIVEPROXY_META_SHA256:-}"
+  url="${NAIVEPROXY_META_URL:-}"
+
+  [ "$meta_version" = "$version" ] ||
+    die "NaiveProxy metadata version mismatch: feed=$version metadata=${meta_version:-missing}"
+  [ "$meta_release" = "$release" ] ||
+    die "NaiveProxy metadata release mismatch: feed=$release metadata=${meta_release:-missing}"
+  [ "$meta_asset" = "$asset" ] ||
+    die "NaiveProxy metadata asset mismatch: expected=$asset metadata=${meta_asset:-missing}"
+  [ "${#expected_sha}" -eq 64 ] ||
+    die "NaiveProxy official digest has invalid length: ${expected_sha:-missing}"
+  case "$expected_sha" in
+    *[!0-9a-f]*)
+      die "NaiveProxy official digest is not lowercase SHA256: $expected_sha"
+      ;;
+  esac
+  [ "$url" = "https://github.com/klzgrad/naiveproxy/releases/download/${tag}/${asset}" ] ||
+    die "Unexpected NaiveProxy asset URL: ${url:-missing}"
 
   echo "NaiveProxy: version=${version}, release=${release}, arch=${NAIVEPROXY_ARCH}"
-  echo "读取 GitHub Release 官方 digest：$api_url"
-
-  api_headers=(
-    -H "Accept: application/vnd.github+json"
-    -H "X-GitHub-Api-Version: 2022-11-28"
-  )
-  if [ -n "$auth_token" ]; then
-    api_headers+=(-H "Authorization: Bearer $auth_token")
-  fi
-
-  if ! curl -fsSL --retry 4 --retry-delay 2 --retry-all-errors \
-    "${api_headers[@]}" "$api_url" -o "$api_json"; then
-    rm -f "$api_json"
-    die "Unable to read NaiveProxy release metadata: $tag"
-  fi
-
-  if ! asset_meta="$(
-    python3 - "$api_json" "$asset" <<'PY'
-from pathlib import Path
-import json
-import re
-import sys
-
-metadata = json.loads(Path(sys.argv[1]).read_text())
-asset_name = sys.argv[2]
-matches = [item for item in metadata.get("assets", []) if item.get("name") == asset_name]
-
-if len(matches) != 1:
-    raise SystemExit(
-        f"Expected exactly one NaiveProxy release asset {asset_name!r}, found {len(matches)}"
-    )
-
-item = matches[0]
-digest = item.get("digest")
-url = item.get("browser_download_url")
-
-if not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-fA-F]{64}", digest):
-    raise SystemExit(f"NaiveProxy asset has no usable GitHub SHA256 digest: {digest!r}")
-if not isinstance(url, str) or not url.startswith("https://github.com/klzgrad/naiveproxy/releases/download/"):
-    raise SystemExit(f"Unexpected NaiveProxy asset URL: {url!r}")
-
-print(digest.split(":", 1)[1].lower())
-print(url)
-PY
-  )"; then
-    rm -f "$api_json"
-    die "Unable to verify NaiveProxy release metadata: $asset"
-  fi
-  rm -f "$api_json"
-
-  expected_sha="$(printf '%s\n' "$asset_meta" | sed -n '1p')"
-  url="$(printf '%s\n' "$asset_meta" | sed -n '2p')"
-  [ -n "$expected_sha" ] || die "NaiveProxy official digest is empty: $asset"
-  [ -n "$url" ] || die "NaiveProxy official asset URL is empty: $asset"
+  echo "使用 Preflight 校验的 GitHub Release digest：$expected_sha"
 
   if [ -s "$archive" ]; then
     actual_sha="$(sha256sum "$archive" | awk '{print $1}')"
