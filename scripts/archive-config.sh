@@ -164,6 +164,7 @@ feed-commits.txt
   排查“仓库没改但构建/功能突然变化”时，优先比较两次 build-info.txt 中：
     source_commit
     pwpackages_commit
+    upstream_meson_mk_sha256
     upstream_golang_commit
     upstream_aliyundrive_webdav_commit
     upstream_lede_commit              # 同时对应当前引入的 ninja / adbyby
@@ -174,9 +175,9 @@ feed-commits.txt
 
   建议判断顺序：
     1. source_commit 是否变化；
-    2. PWpackages 和四个 upstream commit 是否变化；
-    3. feed_fingerprint / NaiveProxy / final_config_sha256 是否变化；
-    4. 都没变化时，再检查 Actions Runner、下载、缓存或工具链环境差异。
+    2. PWpackages、meson.mk SHA256 和四个动态仓库 commit 是否变化；
+    3. feed_fingerprint 不同时比较 feed-commits.txt，定位具体 feed，再看 NaiveProxy / final_config_sha256；
+    4. 动态上游、feeds 和配置都没变化时，再检查 Actions Runner、下载、缓存或工具链环境差异。
 
   这些 commit 仅用于追溯，不代表长期锁版本；后续构建仍按仓库既定追新策略获取最新上游。
 
