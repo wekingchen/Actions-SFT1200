@@ -107,7 +107,7 @@ jobs:
           marker = "\n  build:\n"
           if marker not in workflow:
               raise SystemExit("预检错误：找不到 build job")
-          build = workflow.split(marker, 1)[1]
+          preflight, build = workflow.split(marker, 1)
           normalized_build = " ".join(build.split())
 
           def require(condition, message):
@@ -144,11 +144,11 @@ jobs:
                   "单线程诊断未局部注入 hostpkg LD_LIBRARY_PATH")
 
           # 通用语法/表达式错误交给 actionlint + shellcheck。
-          require("actionlint_version=\"1.7.12\"" in build,
+          require("actionlint_version=\"1.7.12\"" in preflight,
                   "Preflight 缺少固定版本 actionlint")
-          require("shellcheck -S error" in build,
+          require("shellcheck -S error" in preflight,
                   "Preflight 缺少 shellcheck error 级检查")
-          require("sha256sum -c -" in build,
+          require("sha256sum -c -" in preflight,
                   "actionlint 下载缺少 SHA256 校验")
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
