@@ -127,6 +127,26 @@ jobs:
               require(required in patch_gen_config,
                       f"gen_config 补丁脚本缺少关键兼容项：{required}")
 
+          # NaiveProxy 必须使用 GitHub Release 官方 digest 校验，不能下载后自生成 PKG_HASH。
+          require(
+              "api.github.com/repos/klzgrad/naiveproxy/releases/tags/" in diy2,
+              "NaiveProxy 未读取 GitHub Release 元数据",
+          )
+          require('item.get("digest")' in diy2,
+                  "NaiveProxy 未读取 Release asset digest")
+          require("NaiveProxy SHA256 verified by GitHub Release digest" in diy2,
+                  "NaiveProxy 缺少官方 digest 强校验")
+          require('if [ "$actual_sha" != "$expected_sha" ]' in diy2,
+                  "NaiveProxy 下载内容没有与官方 digest 强制比较")
+          require('sha256="$(sha256sum "$archive"' not in diy2,
+                  "NaiveProxy 仍使用下载结果自生成 PKG_HASH")
+          require('GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}' in build,
+                  "NaiveProxy Release API 未使用 Actions token，容易触发匿名限流")
+          require(".sft1200-naiveproxy.env" in diy2,
+                  "NaiveProxy 缺少构建追溯元数据")
+          require(".sft1200-naiveproxy.env" in archive_config,
+                  "配置留档未记录 NaiveProxy 追溯元数据")
+
           # 成功构建必须留下可追溯的最终配置记录。
           require("生成最终配置留档" in build, "缺少最终配置留档步骤")
           require("上传最终配置留档" in build, "缺少最终配置 Artifact")
@@ -375,6 +395,8 @@ jobs:
 
     - name: 加载并应用自定义配置
       id: custom-config
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       run: |
         [ -e files ] && mv files openwrt/openwrt-18.06/siflower/openwrt-18.06/files
 
