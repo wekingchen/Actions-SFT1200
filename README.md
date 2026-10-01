@@ -17,7 +17,7 @@
 核心逻辑位于 [diy-part2.sh](diy-part2.sh)：
 
 - Passwall UI 与 Passwall packages 跟随上游 main。
-- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；从 GitHub Release API 读取对应资产的官方 SHA256 digest，缓存命中和新下载都必须校验通过后才写入 `PKG_HASH`。
+- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，build job 只消费校验后的公开元数据，缓存命中和新下载都必须再次校验通过后才写入 `PKG_HASH`。
 - 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件。
 - 隔离现代 LuCI 的 `luci-compat / luci-lua-runtime / ucode` 依赖，继续使用 18.06 原生 Lua LuCI。
 - 固定使用 OpenWrt 18.06 官方 miniupnpd，避免现代 nftables 变种污染旧 Kconfig。
@@ -40,6 +40,8 @@
 - 固件 manifest 功能完整性检查
 - 成功构建自动生成最终配置留档，并上传 `config-record` Artifact
 - 编译成功后上传 `bin` Artifact 与 Release；Release 同时附带配置留档
+- build job 仅有 `contents: read`，`actions/checkout` 禁止持久化凭据；feeds、Makefile、`make`、`diy-part2.sh` 等第三方构建代码运行期间没有 GitHub 写令牌。
+- Release 附件先由 build job 打包为短期 Artifact，再交给独立 release job；只有 release job 拥有 `contents: write + actions: write`，并使用 Runner 自带 `gh` CLI 发布和清理，不把写令牌交给第三方 Release Action。
 - 自动清理旧 Workflow Runs；只有本轮固件成功发布 Release 后，才清理旧 Releases 并保留最近 10 个，失败构建不会占用或挤掉 Release 位置。
 
 ### SFT1200 上游更新检查
@@ -111,6 +113,7 @@ scripts/archive-config.sh \
 - `.github/workflows/build-openwrt.yml`：主编译工作流。
 - `.github/workflows/update-checker.yml`：Passwall 与 helloworld 上游更新监控。
 - `scripts/patch-gen-config.py`：以可审查方式为上游 `scripts/gen_config.py` 注入 SFT1200/OpenWrt 18.06 feeds 兼容钩子。
+- `scripts/resolve-naiveproxy-release.py`：在只读 Preflight 中解析 NaiveProxy Release 资产及官方 digest，避免 build job 持有 GitHub token。
 - `scripts/archive-config.sh`：成功构建的最终配置留档与差异生成工具。
 - `libs.zip`：本仓库维护的 OpenSSL / ustream 兼容文件。
 - `board-2.bin.*`：SFT1200 板级文件。
