@@ -17,7 +17,7 @@
 核心逻辑位于 [diy-part2.sh](diy-part2.sh)：
 
 - Passwall UI 与 Passwall packages 跟随上游 main。
-- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，build job 只消费校验后的公开元数据，缓存命中和新下载都必须再次校验通过后才写入 `PKG_HASH`。
+- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；由只读 Preflight 解析 GitHub Release 官方 SHA256 digest，build job 只消费校验后的公开元数据，缓存命中和新下载都必须再次校验通过后才写入 `PKG_HASH`。若目标 Release 资产没有 GitHub 提供的 SHA256 digest，则构建直接失败，不降级为“下载后自算 hash”。
 - 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件。
 - 隔离现代 LuCI 的 `luci-compat / luci-lua-runtime / ucode` 依赖，继续使用 18.06 原生 Lua LuCI。
 - 固定使用 OpenWrt 18.06 官方 miniupnpd，避免现代 nftables 变种污染旧 Kconfig。
@@ -35,6 +35,7 @@
 - 下载缓存 `dl/`
 - C/C++ ccache
 - Go `GOCACHE`
+- build job 总时长上限为 180 分钟；最近一次明确的冷缓存构建约 98 分钟，保留额外余量用于工具链、Rust/Go、下载和 Runner 波动
 - 精简的控制台编译输出
 - 编译失败时自动上传完整诊断日志
 - 固件 manifest 功能完整性检查
