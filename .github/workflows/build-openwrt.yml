@@ -183,15 +183,17 @@ jobs:
           require("sha256sum -c -" in preflight,
                   "actionlint 下载缺少 SHA256 校验")
 
-          # 失败诊断必须有时间边界，优先只重跑失败 package target。
-          require("timeout-minutes: 120" in build,
+          # 失败诊断必须有时间边界并优先定向重跑；具体超时值属于可调参数，不在此写死。
+          require("timeout-minutes:" in build,
                   "build job 缺少总时长上限")
-          require('diagnostic_timeout="20m"' in build,
+          require("diagnostic_timeout=" in build,
                   "失败诊断缺少独立超时上限")
           require('make "$failed_target" -j1 V=s' in build,
-                  "失败诊断没有优先重跑失败 package target")
-          require('timeout --signal=TERM --kill-after=1m "$diagnostic_timeout"' in build,
+                  "失败诊断没有优先重跑失败目标")
+          require('"$diagnostic_timeout"' in build and "timeout " in build,
                   "失败诊断 timeout 保护缺失")
+          require("(package|tools|toolchain)" in build,
+                  "失败目标提取未覆盖 package / tools / toolchain")
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
@@ -372,7 +374,7 @@ jobs:
     name: 编译 SFT1200 固件
     needs: preflight
     runs-on: ubuntu-22.04
-    timeout-minutes: 120
+    timeout-minutes: 180
     permissions:
       contents: read
     outputs:
@@ -707,12 +709,12 @@ jobs:
           echo "::group::失败目标诊断重试"
 
           failed_target="$(
-            sed -nE 's/.*ERROR: (package\/[^[:space:]]+) failed to build.*/\1\/compile/p' build.log |
+            sed -nE 's/.*ERROR: ((package|tools|toolchain)\/[^[:space:]]+) failed to build.*/\1\/compile/p' build.log |
             tail -n 1
           )"
           if [ -z "$failed_target" ]; then
             failed_target="$(
-              grep -Eo 'package/[^[:space:]]+/compile' build.log |
+              grep -Eo '(package|tools|toolchain)/[^[:space:]]+/compile' build.log |
               tail -n 1 || true
             )"
           fi
