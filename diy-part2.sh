@@ -650,12 +650,6 @@ if [ -d staging_dir/hostpkg/lib ]; then
   find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
 fi
 
-hostpkg_lib="$PWD/staging_dir/hostpkg/lib"
-export LD_LIBRARY_PATH="${hostpkg_lib}:${LD_LIBRARY_PATH:-}"
-
-# 将运行时库搜索路径写入 GITHUB_ENV，供后续 Actions 步骤继续使用。
-if [ -n "${GITHUB_ENV:-}" ]; then
-  echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
-fi
-
+# hostpkg 的运行时库路径只应提供给后续真正执行编译的 make 进程。
+# 不在这里 export，也不写入 GITHUB_ENV，避免污染后续 Actions 宿主程序。
 section "diy-part2 执行完成"
