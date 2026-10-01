@@ -94,6 +94,7 @@ jobs:
           echo "检查项目级兼容约束"
           python3 - <<'PY'
           from pathlib import Path
+          import re
 
           workflow = Path(".github/workflows/build-openwrt.yml").read_text()
           checker = Path(".github/workflows/update-checker.yml").read_text()
@@ -108,11 +109,18 @@ jobs:
           if marker not in workflow:
               raise SystemExit("预检错误：找不到 build job")
           preflight, build = workflow.split(marker, 1)
-          normalized_build = " ".join(build.split())
 
           def require(condition, message):
               if not condition:
                   raise SystemExit(f"预检错误：{message}")
+
+          def get_step(name):
+              pattern = re.compile(
+                  rf"(?ms)^    - name: {re.escape(name)}\\n(?P<body>.*?)(?=^    - name: |\\Z)"
+              )
+              match = pattern.search(build)
+              require(match is not None, f"找不到 workflow step：{name}")
+              return " ".join(match.group("body").split())
 
           # setup.py 内部会创建 Git 提交，身份必须在调用前设置。
           setup_pos = build.find("python3 setup.py")
@@ -231,34 +239,60 @@ jobs:
           ):
               require(required in archive_config, f"配置留档工具缺少 {required}")
 
-          # 固件分发必须经过 manifest 验收。
-          # 对 YAML 空白做归一化，避免仅因换行/缩进调整产生误报。
-          require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_BIN_DIR"
-              in normalized_build,
-              "bin Artifact 未受 manifest 验收控制",
-          )
-          require(
-              "steps.manifest.outputs.status == 'success' && env.UPLOAD_RELEASE"
-              in normalized_build,
-              "Release tag 未受 manifest 验收控制",
-          )
-          require(
-              "steps.manifest.outputs.status == 'success' && steps.config-record.outputs.status == 'success' && steps.release-assets.outputs.status == 'success' && steps.tag.outputs.status == 'success'"
-              in normalized_build,
-              "Release 上传未受 manifest / 配置留档 / 附件准备成功控制",
-          )
-          require('find "$firmware_root" -type f -name \'openwrt-*squashfs*\'' in build,
+          # 固件分发必须经过 manifest / 配置留档 / 附件准备验收。
+          # 这里按具体 step 提取条件并逐项检查，不依赖条件顺序、空格或换行。
+          bin_upload_step = get_step("上传完整 bin 目录")
+          release_assets_step = get_step("准备 Release 附件")
+          tag_step = get_step("生成 Release 标签")
+          release_step = get_step("发布固件到 Release")
+          release_cleanup_step = get_step("清理旧 Releases")
+
+          for token in (
+              "steps.manifest.outputs.status == 'success'",
+              "env.UPLOAD_BIN_DIR",
+          ):
+              require(token in bin_upload_step,
+                      f"bin Artifact 缺少 gate：{token}")
+
+          for token in (
+              "steps.compile.outputs.status == 'success'",
+              "steps.manifest.outputs.status == 'success'",
+              "steps.config-record.outputs.status == 'success'",
+              "env.UPLOAD_RELEASE == 'true'",
+          ):
+              require(token in release_assets_step,
+                      f"Release 附件准备缺少 gate：{token}")
+
+          for token in (
+              "steps.compile.outputs.status == 'success'",
+              "steps.manifest.outputs.status == 'success'",
+              "steps.config-record.outputs.status == 'success'",
+              "steps.release-assets.outputs.status == 'success'",
+              "env.UPLOAD_RELEASE == 'true'",
+          ):
+              require(token in tag_step,
+                      f"Release tag 缺少 gate：{token}")
+
+          for token in (
+              "steps.compile.outputs.status == 'success'",
+              "steps.manifest.outputs.status == 'success'",
+              "steps.config-record.outputs.status == 'success'",
+              "steps.release-assets.outputs.status == 'success'",
+              "steps.tag.outputs.status == 'success'",
+          ):
+              require(token in release_step,
+                      f"Release 上传缺少 gate：{token}")
+
+          require('find "$firmware_root" -type f -name \'openwrt-*squashfs*\'' in release_assets_step,
                   "Release 附件未从真实 target 目录动态发现固件")
-          require("release-assets/*" in build,
+          require("release-assets/*" in release_step,
                   "Release 未使用统一 staging 目录上传附件")
-          require("bin/targets/siflower/" + "*/openwrt-*squashfs*" not in build,
+          require("bin/targets/siflower/" + "*/openwrt-*squashfs*" not in release_step,
                   "Release 仍硬编码错误的子目录层级")
-          require(
-              "if: steps.release-upload.conclusion == 'success' && !cancelled()"
-              in normalized_build,
-              "旧 Release 清理没有绑定本轮 Release 成功状态",
-          )
+          require("steps.release-upload.conclusion == 'success'" in release_cleanup_step,
+                  "旧 Release 清理没有绑定本轮 Release 成功状态")
+          require("!cancelled()" in release_cleanup_step,
+                  "旧 Release 清理缺少 cancelled() 保护")
 
           # manifest 只能验证 SFT1200 image manifest，不能误取 Packages.manifest。
           require("profile_sanitized" in build, "manifest 未按 SFT1200 profile 精确匹配")
@@ -267,7 +301,6 @@ jobs:
                   "manifest 解析格式与 Siflower 18.06 opkg list-installed 不一致")
 
           # 每个 diy-part2 功能段只能出现一次，防止分步编辑时把脚本尾部重复拼接。
-          import re
           sections = re.findall(r'^section "([^"]+)"', diy2, flags=re.MULTILINE)
           duplicates = sorted({name for name in sections if sections.count(name) > 1})
           require(not duplicates, f"diy-part2.sh 存在重复 section：{duplicates}")
