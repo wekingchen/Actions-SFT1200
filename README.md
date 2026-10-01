@@ -17,7 +17,7 @@
 核心逻辑位于 [diy-part2.sh](diy-part2.sh)：
 
 - Passwall UI 与 Passwall packages 跟随上游 main。
-- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包，并自动下载、计算和写入 SHA256。
+- 自动为 Siflower 选择 NaiveProxy 的 `mipsel_24kc-static` 预编译包；从 GitHub Release API 读取对应资产的官方 SHA256 digest，缓存命中和新下载都必须校验通过后才写入 `PKG_HASH`。
 - 使用较新的 Shadowsocks / Xray / Go / Rust 等代理相关组件。
 - 隔离现代 LuCI 的 `luci-compat / luci-lua-runtime / ucode` 依赖，继续使用 18.06 原生 Lua LuCI。
 - 固定使用 OpenWrt 18.06 官方 miniupnpd，避免现代 nftables 变种污染旧 Kconfig。
@@ -68,7 +68,7 @@
 - `final.config`：经过 `diy-part2.sh`、`make defconfig` 后，本次固件真正使用的最终 `.config`。
 - `diffconfig.txt`：OpenWrt `scripts/diffconfig.sh` 的输出，只保留相对默认配置真正有意义的选项；人工复核和迁移时优先看它。
 - `config-changes.diff`：按 `CONFIG_*` symbol 比较 `repository.config` 与 `final.config` 的语义差异，忽略纯排序变化。
-- `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、build cache 指纹和最终 `.config` SHA256。
+- `build-info.txt`：记录仓库 commit、Actions run、设备 profile、feeds 指纹、build cache 指纹、最终 `.config` SHA256，以及 NaiveProxy 实际版本、资产名与经 GitHub Release digest 验证的 SHA256。
 - `README.txt`：Artifact 内置使用说明；即使以后只下载到这一份留档，也能知道每个文件的用途。
 
 ### 什么时候需要更新仓库 `.config`
