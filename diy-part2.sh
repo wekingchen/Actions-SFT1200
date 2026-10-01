@@ -15,6 +15,11 @@ IFS=$'\n\t'
 readonly MINIUPNPD_1806_COMMIT="0171d18e051a0afdc5bc52b9e7913518b2e2a2a0"
 readonly GOLANG_BRANCH="27.x"
 readonly NAIVEPROXY_ARCH="mipsel_24kc-static"
+readonly UPSTREAM_RECORD=".sft1200-upstreams.env"
+
+# 每次运行重新生成，记录 diy-part2 直接追踪的动态上游实际 commit。
+# 这些记录只用于构建追溯，不参与版本锁定。
+: > "$UPSTREAM_RECORD"
 
 section() {
   printf '\n========== %s ==========\n' "$*"
@@ -23,6 +28,20 @@ section() {
 die() {
   echo "ERROR: $*" >&2
   exit 1
+}
+
+record_upstream() {
+  local key="$1"
+  local repo_dir="$2"
+  local commit
+
+  [ -d "$repo_dir/.git" ] || die "Upstream repository not found: $repo_dir"
+  commit="$(git -C "$repo_dir" rev-parse HEAD)"
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] ||
+    die "Invalid upstream commit for $key: $commit"
+
+  printf '%s=%s\n' "$key" "$commit" >> "$UPSTREAM_RECORD"
+  echo "上游快照：$key=$commit"
 }
 
 replace_dir() {
@@ -406,6 +425,7 @@ rm -rf feeds/gl_feed_common/golang
 git clone --depth=1 --branch "$GOLANG_BRANCH" \
   https://github.com/sbwml/packages_lang_golang \
   feeds/gl_feed_common/golang
+record_upstream upstream_golang_commit feeds/gl_feed_common/golang
 sed -i '/-linkmode external \\/d' feeds/gl_feed_common/golang/golang-package.mk
 
 # Go 默认把 GOCACHE 放在 tmp/go-build，工作流结束后会丢失。
@@ -421,6 +441,7 @@ section "附加应用与构建工具"
 
 aliyun_tmp="$(mktemp -d)"
 git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git "$aliyun_tmp"
+record_upstream upstream_aliyundrive_webdav_commit "$aliyun_tmp"
 replace_dir "$aliyun_tmp/openwrt/aliyundrive-webdav" feeds/packages2/multimedia/aliyundrive-webdav
 replace_dir "$aliyun_tmp/openwrt/luci-app-aliyundrive-webdav" feeds/luci2/applications/luci-app-aliyundrive-webdav
 rm -rf "$aliyun_tmp"
@@ -428,6 +449,7 @@ rm -rf "$aliyun_tmp"
 # LEDE 这里只需要 ninja 和 adbyby 两个目录，使用 sparse checkout 避免拉完整工作树。
 lede_tmp="$(mktemp -d)"
 git clone --depth=1 --filter=blob:none --sparse https://github.com/coolsnowwolf/lede.git "$lede_tmp"
+record_upstream upstream_lede_commit "$lede_tmp"
 git -C "$lede_tmp" sparse-checkout set tools/ninja package/lean/adbyby
 replace_dir "$lede_tmp/tools/ninja" tools/ninja
 replace_dir "$lede_tmp/package/lean/adbyby" package/adbyby
@@ -435,6 +457,7 @@ rm -rf "$lede_tmp"
 
 rm -rf package/luci-app-adguardhome
 git clone --depth=1 https://github.com/kongfl888/luci-app-adguardhome.git package/luci-app-adguardhome
+record_upstream upstream_luci_app_adguardhome_commit package/luci-app-adguardhome
 
 
 section "板级文件与本地兼容库"
@@ -617,6 +640,19 @@ if [ -d staging_dir/hostpkg/lib ]; then
   find staging_dir/hostpkg/lib -type f -name 'libncurses.a' -delete || true
   find staging_dir/hostpkg/lib -type f -name 'libpanel.a' -delete || true
 fi
+
+# 上游追溯文件必须完整，避免成功构建却缺少关键动态来源的 commit。
+for upstream_key in \
+  upstream_golang_commit \
+  upstream_aliyundrive_webdav_commit \
+  upstream_lede_commit \
+  upstream_luci_app_adguardhome_commit; do
+  grep -Eq "^${upstream_key}=[0-9a-f]{40}$" "$UPSTREAM_RECORD" ||
+    die "Missing upstream trace record: $upstream_key"
+done
+
+echo "动态上游快照："
+cat "$UPSTREAM_RECORD"
 
 # hostpkg 的运行时库路径只应提供给后续真正执行编译的 make 进程。
 # 不在这里 export，也不写入 GITHUB_ENV，避免污染后续 Actions 宿主程序。
