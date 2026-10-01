@@ -140,6 +140,7 @@ scripts/archive-config.sh \
 ```
 
 第一个参数必须是**仓库基线 `.config`**，第二个参数是经过兼容脚本和 `make defconfig` 后的**最终 `.config`**。
+
 ## 关键文件
 
 - `.config`：当前 SFT1200 固件功能配置。
