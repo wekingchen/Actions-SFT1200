@@ -317,6 +317,8 @@ jobs:
               require(required in archive_config, f"配置留档工具缺少 {required}")
           require("FEED_COMMITS_FILE" in build and "/tmp/sft1200-feed-commits.txt" in build,
                   "配置留档未接入 feeds commit 明细")
+          require('[ -e "$feed/.git" ] || continue' in build,
+                  "feeds commit 明细未排除非 Git 的 .tmp 等目录")
 
           # 固件分发必须经过 manifest / 配置留档 / 附件准备验收。
           # 这里按具体 step 提取条件并逐项检查，不依赖条件顺序、空格或换行。
@@ -629,9 +631,11 @@ jobs:
         {
           for feed in feeds/*; do
             [ -d "$feed" ] || continue
-            if git -C "$feed" rev-parse HEAD >/dev/null 2>&1; then
-              printf '%s=%s\n' "$(basename "$feed")" "$(git -C "$feed" rev-parse HEAD)"
-            fi
+            # 只记录自身就是 Git 仓库/worktree 的真实 feed。
+            # 避免 feeds/*.tmp 等普通目录让 git 向父目录查找 .git，
+            # 从而误记成 OpenWrt 根仓库 HEAD。
+            [ -e "$feed/.git" ] || continue
+            printf '%s=%s\n' "$(basename "$feed")" "$(git -C "$feed" rev-parse HEAD)"
           done
         } | sort | tee /tmp/sft1200-feed-commits.txt
         echo "hash=$(sha256sum /tmp/sft1200-feed-commits.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
