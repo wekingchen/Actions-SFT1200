@@ -17,11 +17,6 @@ readonly GOLANG_BRANCH="27.x"
 readonly NAIVEPROXY_ARCH="mipsel_24kc-static"
 readonly UPSTREAM_RECORD=".sft1200-upstreams.env"
 
-# diy-part1 已创建追溯文件并记录直接追踪 LEDE master 的 meson.mk SHA256。
-# 这里保留该记录并继续追加 diy-part2 的动态上游 commit。
-[ -s "$UPSTREAM_RECORD" ] ||
-  die "Missing upstream trace record from diy-part1: $UPSTREAM_RECORD"
-grep -Eq '^upstream_meson_mk_sha256=[0-9a-f]{64}
 section() {
   printf '\n========== %s ==========\n' "$*"
 }
@@ -30,6 +25,13 @@ die() {
   echo "ERROR: $*" >&2
   exit 1
 }
+
+# diy-part1 已创建追溯文件并记录直接追踪 LEDE master 的 meson.mk SHA256。
+# 这里保留该记录并继续追加 diy-part2 的动态上游 commit。
+[ -s "$UPSTREAM_RECORD" ] ||
+  die "Missing upstream trace record from diy-part1: $UPSTREAM_RECORD"
+grep -Eq '^upstream_meson_mk_sha256=[0-9a-f]{64}$' "$UPSTREAM_RECORD" ||
+  die "Invalid or missing upstream_meson_mk_sha256 in $UPSTREAM_RECORD"
 
 record_upstream() {
   local key="$1"
