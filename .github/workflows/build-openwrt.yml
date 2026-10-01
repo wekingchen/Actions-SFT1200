@@ -140,8 +140,8 @@ jobs:
                   "diy-part2 仍全局 export LD_LIBRARY_PATH")
           require('LD_LIBRARY_PATH="$make_ld_library_path" make -j$(nproc)' in build,
                   "并行编译未局部注入 hostpkg LD_LIBRARY_PATH")
-          require('LD_LIBRARY_PATH="$make_ld_library_path" make -j1 V=s' in build,
-                  "单线程诊断未局部注入 hostpkg LD_LIBRARY_PATH")
+          require('env LD_LIBRARY_PATH="$make_ld_library_path"' in build,
+                  "诊断重试未局部注入 hostpkg LD_LIBRARY_PATH")
 
           # 通用语法/表达式错误交给 actionlint + shellcheck。
           require("actionlint_version=\"1.7.12\"" in preflight,
@@ -150,6 +150,16 @@ jobs:
                   "Preflight 缺少 shellcheck error 级检查")
           require("sha256sum -c -" in preflight,
                   "actionlint 下载缺少 SHA256 校验")
+
+          # 失败诊断必须有时间边界，优先只重跑失败 package target。
+          require("timeout-minutes: 120" in build,
+                  "build job 缺少总时长上限")
+          require('diagnostic_timeout="20m"' in build,
+                  "失败诊断缺少独立超时上限")
+          require('make "$failed_target" -j1 V=s' in build,
+                  "失败诊断没有优先重跑失败 package target")
+          require('timeout --signal=TERM --kill-after=1m "$diagnostic_timeout"' in build,
+                  "失败诊断 timeout 保护缺失")
 
           # cache 必须使用 restore/save 分离模式，避免 post-save 重复逻辑。
           require("actions/cache/restore@v6" in build, "缺少 cache restore")
@@ -284,6 +294,7 @@ jobs:
     name: 编译 SFT1200 固件
     needs: preflight
     runs-on: ubuntu-22.04
+    timeout-minutes: 120
     permissions:
       actions: write
       contents: write
@@ -609,16 +620,45 @@ jobs:
           tail -n 200 build.log || true
           echo "::endgroup::"
 
-          echo "::group::单线程诊断重试"
+          echo "::group::失败目标诊断重试"
+
+          failed_target="$(
+            {
+              sed -nE 's/.*ERROR: (package\/[^[:space:]]+) failed to build.*/\1\/compile/p' build.log
+              grep -Eo 'package/[^[:space:]\]]+/compile' build.log || true
+            } |
+            sed 's/[[:punct:]]*$//' |
+            tail -n 1
+          )"
+
+          diagnostic_timeout="20m"
           set +e
-          LD_LIBRARY_PATH="$make_ld_library_path" make -j1 V=s > build-failure.log 2>&1
-          retry_status=$?
+          if [ -n "$failed_target" ]; then
+            echo "检测到失败目标：$failed_target"
+            echo "仅重跑失败目标，诊断上限：$diagnostic_timeout"
+            timeout --signal=TERM --kill-after=1m "$diagnostic_timeout" \
+              env LD_LIBRARY_PATH="$make_ld_library_path" \
+              make "$failed_target" -j1 V=s > build-failure.log 2>&1
+            retry_status=$?
+          else
+            echo "未能从 build.log 稳定识别失败 package target。"
+            echo "执行有限时的全量单线程诊断，最多 $diagnostic_timeout，不允许无限重跑。"
+            timeout --signal=TERM --kill-after=1m "$diagnostic_timeout" \
+              env LD_LIBRARY_PATH="$make_ld_library_path" \
+              make -j1 V=s > build-failure.log 2>&1
+            retry_status=$?
+          fi
           set -e
+
+          if [ "$retry_status" -eq 124 ] || [ "$retry_status" -eq 137 ]; then
+            echo "诊断重试达到 $diagnostic_timeout 超时上限，已终止。"
+          fi
+
           grep -nE '(^|[[:space:]])(fatal error:|error:|Error [0-9]+|FAILED:|No rule to make target|undefined reference)' build-failure.log | tail -n 250 || true
           echo
           echo "build-failure.log 最后 300 行："
           tail -n 300 build-failure.log || true
-          echo "单线程诊断重试退出状态：$retry_status"
+          echo "诊断重试退出状态：$retry_status"
           echo "::endgroup::"
 
           exit "$build_status"
