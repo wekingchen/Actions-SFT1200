@@ -11,9 +11,6 @@
 name: SFT1200 固件编译
 
 on:
-  push:
-    branches:
-      - fix/restore-luci-baseline
   repository_dispatch:
   workflow_dispatch:
     inputs:
@@ -40,7 +37,7 @@ env:
   UPLOAD_FIRMWARE: false
   UPLOAD_COWTRANSFER: false
   UPLOAD_WETRANSFER: false
-  UPLOAD_RELEASE: false
+  UPLOAD_RELEASE: true
   TZ: Asia/Shanghai
   # OpenWrt 18.06 ccache settings. "content" avoids misses when the rebuilt
   # compiler has identical bytes but a different timestamp.
