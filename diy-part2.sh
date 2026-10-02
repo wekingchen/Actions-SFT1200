@@ -13,6 +13,8 @@ set -Eeuo pipefail
 IFS=$'\n\t'
 
 readonly MINIUPNPD_1806_COMMIT="0171d18e051a0afdc5bc52b9e7913518b2e2a2a0"
+readonly LEGACY_LUCI_COMMIT="548670c9f699689b26e33ed6a300c3717d72a2b6"
+readonly LEGACY_PACKAGES_1806_COMMIT="a1213c7a2011a2916fb357462a51082ffe9fa2c4"
 readonly GOLANG_BRANCH="27.x"
 readonly NAIVEPROXY_ARCH="mipsel_24kc-static"
 readonly UPSTREAM_RECORD=".sft1200-upstreams.env"
@@ -46,6 +48,18 @@ record_upstream() {
   sed -i "/^${key}=/d" "$UPSTREAM_RECORD"
   printf '%s=%s\n' "$key" "$commit" >> "$UPSTREAM_RECORD"
   echo "上游快照：$key=$commit"
+}
+
+record_fixed_upstream() {
+  local key="$1"
+  local commit="$2"
+
+  [[ "$commit" =~ ^[0-9a-f]{40}$ ]] ||
+    die "Invalid fixed upstream commit for $key: $commit"
+
+  sed -i "/^${key}=/d" "$UPSTREAM_RECORD"
+  printf '%s=%s\n' "$key" "$commit" >> "$UPSTREAM_RECORD"
+  echo "固定上游快照：$key=$commit"
 }
 
 replace_dir() {
@@ -441,13 +455,65 @@ grep -Fq '$(TOPDIR)/.cache/go-build' feeds/gl_feed_common/golang/golang-values.m
   die "Go GOCACHE 路径修改未生效"
 
 
+section "恢复旧版 LuCI 功能"
+
+# #786 之前的基准配置依赖这些 Lua LuCI 前端。它们已不再由当前固定的 luci2
+# 快照完整提供，因此单独固定兼容源码并放入 package/；这些包本身仍是 Lua LuCI，
+# 统一接回系统原生 feeds/luci/luci.mk，避免现代 luci-compat / luci-lua-runtime 依赖。
+legacy_luci_archive="dl/coolsnowwolf-luci-${LEGACY_LUCI_COMMIT}.tar.gz"
+legacy_luci_tmp="$(mktemp -d)"
+download_cached \
+  "https://github.com/coolsnowwolf/luci/archive/${LEGACY_LUCI_COMMIT}.tar.gz" \
+  "$legacy_luci_archive"
+tar -C "$legacy_luci_tmp" -xzf "$legacy_luci_archive"
+legacy_luci_src="$(find "$legacy_luci_tmp" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[ -n "$legacy_luci_src" ] || die "旧版 LuCI 源码解压失败"
+
+for app in luci-app-zerotier luci-app-autoreboot; do
+  replace_dir "$legacy_luci_src/applications/$app" "package/$app"
+
+  # 这两个历史快照使用 zh_Hans 目录；18.06 的 LuCI/Kconfig 使用 zh-cn。
+  if [ -d "package/$app/po/zh_Hans" ]; then
+    rm -rf "package/$app/po/zh-cn"
+    mv "package/$app/po/zh_Hans" "package/$app/po/zh-cn"
+  fi
+
+  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' "package/$app/Makefile"
+done
+rm -rf "$legacy_luci_tmp"
+record_fixed_upstream upstream_legacy_luci_commit "$LEGACY_LUCI_COMMIT"
+
+legacy_packages_archive="dl/openwrt-packages-18.06-${LEGACY_PACKAGES_1806_COMMIT}.tar.gz"
+legacy_packages_tmp="$(mktemp -d)"
+download_cached \
+  "https://github.com/Aibx/OpenWRT-Packages/archive/${LEGACY_PACKAGES_1806_COMMIT}.tar.gz" \
+  "$legacy_packages_archive"
+tar -C "$legacy_packages_tmp" -xzf "$legacy_packages_archive"
+legacy_packages_src="$(find "$legacy_packages_tmp" -mindepth 1 -maxdepth 1 -type d -print -quit)"
+[ -n "$legacy_packages_src" ] || die "OpenWrt 18.06 兼容包源码解压失败"
+
+replace_dir "$legacy_packages_src/luci-app-adbyby-plus" package/luci-app-adbyby-plus
+replace_dir "$legacy_packages_src/luci-theme-argon-mod" package/luci-theme-argon-mod
+rm -rf "$legacy_packages_tmp"
+
+for makefile in \
+  package/luci-app-adbyby-plus/Makefile \
+  package/luci-theme-argon-mod/Makefile; do
+  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' "$makefile"
+done
+record_fixed_upstream upstream_legacy_packages_1806_commit "$LEGACY_PACKAGES_1806_COMMIT"
+
+
 section "附加应用与构建工具"
 
 aliyun_tmp="$(mktemp -d)"
 git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git "$aliyun_tmp"
 record_upstream upstream_aliyundrive_webdav_commit "$aliyun_tmp"
 replace_dir "$aliyun_tmp/openwrt/aliyundrive-webdav" feeds/packages2/multimedia/aliyundrive-webdav
-replace_dir "$aliyun_tmp/openwrt/luci-app-aliyundrive-webdav" feeds/luci2/applications/luci-app-aliyundrive-webdav
+replace_dir "$aliyun_tmp/openwrt/luci-app-aliyundrive-webdav" package/luci-app-aliyundrive-webdav
+rm -rf package/luci-app-aliyundrive-webdav/po/zh_Hans
+sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' \
+  package/luci-app-aliyundrive-webdav/Makefile
 rm -rf "$aliyun_tmp"
 
 # LEDE 这里只需要 ninja 和 adbyby 两个目录，使用 sparse checkout 避免拉完整工作树。
@@ -582,7 +648,19 @@ for symbol in \
   PACKAGE_shadowsocks-libev-ss-local \
   PACKAGE_shadowsocks-libev-ss-redir \
   PACKAGE_trojan \
-  PACKAGE_miniupnpd; do
+  PACKAGE_miniupnpd \
+  PACKAGE_zerotier \
+  PACKAGE_luci-app-zerotier \
+  PACKAGE_luci-i18n-zerotier-zh-cn \
+  PACKAGE_aliyundrive-webdav \
+  PACKAGE_luci-app-aliyundrive-webdav \
+  PACKAGE_luci-i18n-aliyundrive-webdav-zh-cn \
+  PACKAGE_adbyby \
+  PACKAGE_luci-app-adbyby-plus \
+  PACKAGE_luci-i18n-adbyby-plus-zh-cn \
+  PACKAGE_luci-app-autoreboot \
+  PACKAGE_luci-i18n-autoreboot-zh-cn \
+  PACKAGE_luci-theme-argon-mod; do
   config_enable "$symbol"
 done
 
@@ -601,6 +679,18 @@ required_symbols=(
   PACKAGE_shadowsocks-libev-ss-redir
   PACKAGE_trojan
   PACKAGE_miniupnpd
+  PACKAGE_zerotier
+  PACKAGE_luci-app-zerotier
+  PACKAGE_luci-i18n-zerotier-zh-cn
+  PACKAGE_aliyundrive-webdav
+  PACKAGE_luci-app-aliyundrive-webdav
+  PACKAGE_luci-i18n-aliyundrive-webdav-zh-cn
+  PACKAGE_adbyby
+  PACKAGE_luci-app-adbyby-plus
+  PACKAGE_luci-i18n-adbyby-plus-zh-cn
+  PACKAGE_luci-app-autoreboot
+  PACKAGE_luci-i18n-autoreboot-zh-cn
+  PACKAGE_luci-theme-argon-mod
   CCACHE
 )
 
@@ -649,6 +739,8 @@ fi
 for upstream_key in \
   upstream_meson_mk_sha256 \
   upstream_golang_commit \
+  upstream_legacy_luci_commit \
+  upstream_legacy_packages_1806_commit \
   upstream_aliyundrive_webdav_commit \
   upstream_lede_commit \
   upstream_luci_app_adguardhome_commit; do

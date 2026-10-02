@@ -387,6 +387,26 @@ jobs:
           require(sections and sections[-1] == "diy-part2 执行完成",
                   "diy-part2.sh 结尾 section 不完整")
 
+          # #786 前的用户可见 LuCI 功能必须同时存在于仓库配置、defconfig 硬校验和固件 manifest 验收。
+          restored_luci = (
+              "luci-app-zerotier",
+              "luci-i18n-zerotier-zh-cn",
+              "luci-app-aliyundrive-webdav",
+              "luci-i18n-aliyundrive-webdav-zh-cn",
+              "luci-app-adbyby-plus",
+              "luci-i18n-adbyby-plus-zh-cn",
+              "luci-app-autoreboot",
+              "luci-i18n-autoreboot-zh-cn",
+              "luci-theme-argon-mod",
+          )
+          for pkg in restored_luci:
+              require(f"CONFIG_PACKAGE_{pkg}=y" in config,
+                      f".config 缺少恢复功能：{pkg}")
+              require(f"PACKAGE_{pkg}" in diy2,
+                      f"diy-part2 缺少 defconfig 硬校验：{pkg}")
+              require(pkg in build,
+                      f"manifest 验收缺少恢复功能：{pkg}")
+
           # 已明确弃用的 trojan-plus 不应再被配置或强制保留。
           for label, text in {
               ".config": config,
@@ -961,9 +981,19 @@ jobs:
           shadowsocksr-libev-ssr-redir
           trojan
           zerotier
+          luci-app-zerotier
+          luci-i18n-zerotier-zh-cn
           miniupnpd
           luci-app-upnp
           aliyundrive-webdav
+          luci-app-aliyundrive-webdav
+          luci-i18n-aliyundrive-webdav-zh-cn
+          adbyby
+          luci-app-adbyby-plus
+          luci-i18n-adbyby-plus-zh-cn
+          luci-app-autoreboot
+          luci-i18n-autoreboot-zh-cn
+          luci-theme-argon-mod
         )
 
         missing=0
