@@ -458,8 +458,8 @@ grep -Fq '$(TOPDIR)/.cache/go-build' feeds/gl_feed_common/golang/golang-values.m
 section "恢复旧版 LuCI 功能"
 
 # #786 之前的基准配置依赖这些 Lua LuCI 前端。它们已不再由当前固定的 luci2
-# 快照完整提供，因此单独固定兼容源码并放入 package/；统一使用已经过 18.06
-# 兼容处理的 feeds/luci2/luci.mk，避免现代 luci-compat / luci-lua-runtime 依赖。
+# 快照完整提供，因此单独固定兼容源码并放入 package/；这些包本身仍是 Lua LuCI，
+# 统一接回系统原生 feeds/luci/luci.mk，避免现代 luci-compat / luci-lua-runtime 依赖。
 legacy_luci_archive="dl/coolsnowwolf-luci-${LEGACY_LUCI_COMMIT}.tar.gz"
 legacy_luci_tmp="$(mktemp -d)"
 download_cached \
@@ -471,7 +471,14 @@ legacy_luci_src="$(find "$legacy_luci_tmp" -mindepth 1 -maxdepth 1 -type d -prin
 
 for app in luci-app-zerotier luci-app-autoreboot; do
   replace_dir "$legacy_luci_src/applications/$app" "package/$app"
-  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci2/luci.mk' "package/$app/Makefile"
+
+  # 这两个历史快照使用 zh_Hans 目录；18.06 的 LuCI/Kconfig 使用 zh-cn。
+  if [ -d "package/$app/po/zh_Hans" ]; then
+    rm -rf "package/$app/po/zh-cn"
+    mv "package/$app/po/zh_Hans" "package/$app/po/zh-cn"
+  fi
+
+  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' "package/$app/Makefile"
 done
 rm -rf "$legacy_luci_tmp"
 record_fixed_upstream upstream_legacy_luci_commit "$LEGACY_LUCI_COMMIT"
@@ -489,16 +496,10 @@ replace_dir "$legacy_packages_src/luci-app-adbyby-plus" package/luci-app-adbyby-
 replace_dir "$legacy_packages_src/luci-theme-argon-mod" package/luci-theme-argon-mod
 rm -rf "$legacy_packages_tmp"
 
-# 当前 luci2 使用 zh_Hans 作为源语言目录，再映射输出 zh-cn 包名。
-if [ -d package/luci-app-adbyby-plus/po/zh-cn ]; then
-  rm -rf package/luci-app-adbyby-plus/po/zh_Hans
-  mv package/luci-app-adbyby-plus/po/zh-cn package/luci-app-adbyby-plus/po/zh_Hans
-fi
-
 for makefile in \
   package/luci-app-adbyby-plus/Makefile \
   package/luci-theme-argon-mod/Makefile; do
-  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci2/luci.mk' "$makefile"
+  sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' "$makefile"
 done
 record_fixed_upstream upstream_legacy_packages_1806_commit "$LEGACY_PACKAGES_1806_COMMIT"
 
@@ -510,7 +511,8 @@ git clone --depth=1 https://github.com/messense/aliyundrive-webdav.git "$aliyun_
 record_upstream upstream_aliyundrive_webdav_commit "$aliyun_tmp"
 replace_dir "$aliyun_tmp/openwrt/aliyundrive-webdav" feeds/packages2/multimedia/aliyundrive-webdav
 replace_dir "$aliyun_tmp/openwrt/luci-app-aliyundrive-webdav" package/luci-app-aliyundrive-webdav
-sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci2/luci.mk' \
+rm -rf package/luci-app-aliyundrive-webdav/po/zh_Hans
+sed -i '/luci\.mk$/c\include $(TOPDIR)/feeds/luci/luci.mk' \
   package/luci-app-aliyundrive-webdav/Makefile
 rm -rf "$aliyun_tmp"
 
