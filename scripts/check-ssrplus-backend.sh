@@ -43,6 +43,13 @@ grep -Fq 'tcp_port_listening()' "$monitor_src" ||
   die "SSR Plus monitor 端口存活检测未生效"
 grep -Fq 'ps_count:' "$monitor_src" ||
   die "SSR Plus monitor 失败诊断未生效"
+grep -Fq 'uci_get_by_type global prefer_nft 0' "$src" ||
+  die "SSR Plus SFT1200 默认 iptables 未生效"
+grep -Fq 'Xray 配置校验失败，主节点未启动' "$src" ||
+  die "SSR Plus Xray 启动前配置校验未生效"
+client_lua="feeds/helloworld/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua"
+grep -Fq 'o.default = "0"' "$client_lua" ||
+  die "SSR Plus LuCI 默认 firewall 未切换为 iptables"
 
 makefile="feeds/helloworld/luci-app-ssr-plus/Makefile"
 ! grep -Eq 'iptables-(zz-legacy|mod-socket)' "$makefile" ||
@@ -74,6 +81,10 @@ grep -Fq 'tcp_port_listening()' "$final_monitor" ||
   die "最终 SSR Plus ipk 未包含 monitor 端口存活检测"
 grep -Fq 'ps_count:' "$final_monitor" ||
   die "最终 SSR Plus ipk 未包含 monitor 失败诊断"
+grep -Fq 'uci_get_by_type global prefer_nft 0' "$final_init" ||
+  die "最终 SSR Plus ipk 未包含默认 iptables"
+grep -Fq 'Xray 配置校验失败，主节点未启动' "$final_init" ||
+  die "最终 SSR Plus ipk 未包含 Xray 启动前配置校验"
 
 mapfile -t dnsmasq_ipks < <(find bin -type f -name 'dnsmasq-full_*.ipk' -print | sort)
 [ "${#dnsmasq_ipks[@]}" -eq 1 ] || die "dnsmasq-full ipk 数量异常：${#dnsmasq_ipks[@]}"
