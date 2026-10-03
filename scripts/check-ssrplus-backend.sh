@@ -34,8 +34,10 @@ grep -Fq "grep -q -- '--ipset'" "$src" ||
   die "SSR Plus dnsmasq --help 能力探测未生效"
 grep -Fq 'dnsmasq能力：' "$src" ||
   die "SSR Plus dnsmasq 能力诊断日志未生效"
-grep -Fq '透明代理环境检测：' "$src" ||
-  die "SSR Plus 环境诊断日志未生效"
+grep -Fq '透明代理环境异常：' "$src" ||
+  die "SSR Plus 异常环境诊断未保留"
+! grep -Fq '透明代理环境检测：' "$src" ||
+  die "SSR Plus 仍包含正常启动环境检测日志"
 grep -Fq 'runtime.log' "$src" ||
   die "SSR Plus 核心运行日志补丁未生效"
 monitor_src="feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor"
@@ -70,8 +72,10 @@ grep -Fq "grep -q -- '--ipset'" "$final_init" ||
   die "最终 SSR Plus ipk 未包含 dnsmasq --help 能力探测"
 grep -Fq 'dnsmasq能力：' "$final_init" ||
   die "最终 SSR Plus ipk 未包含 dnsmasq 能力诊断日志"
-grep -Fq '透明代理环境检测：' "$final_init" ||
-  die "最终 SSR Plus ipk 未包含环境诊断日志"
+grep -Fq '透明代理环境异常：' "$final_init" ||
+  die "最终 SSR Plus ipk 未包含异常环境诊断"
+! grep -Fq '透明代理环境检测：' "$final_init" ||
+  die "最终 SSR Plus ipk 仍包含正常启动环境检测日志"
 grep -Fq 'runtime.log' "$final_init" ||
   die "最终 SSR Plus ipk 未包含核心运行日志补丁"
 
