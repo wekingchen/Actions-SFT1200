@@ -423,6 +423,97 @@ text = text.replace(
     'dep_list="iptables-mod-tproxy iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
 )
 
+# 5) 18.06 上的 BusyBox ps 即使开启 -w，按配置文件名匹配 redir 进程仍可能不稳定。
+#    同时保留关键核心 stderr，并让 monitor 以 TCP 监听端口作为第二重存活依据。
+ln_old = '''	ulimit -n 1000000
+	${file_func:-echolog "  - ${ln_name}"} "$@" >/dev/null 2>&1 &
+}'''
+ln_new = '''	ulimit -n 1000000
+	case "$ln_name" in
+		v2ray|naive|ss-redir|ssr-redir|trojan|hysteria|tuic-client|shadow-tls)
+			local runtime_log="$TMP_PATH/${ln_name}.runtime.log"
+			${file_func:-echolog "  - ${ln_name}"} "$@" >>"$runtime_log" 2>&1 &
+			;;
+		*)
+			${file_func:-echolog "  - ${ln_name}"} "$@" >/dev/null 2>&1 &
+			;;
+	esac
+}'''
+if ln_old in text:
+    text = text.replace(ln_old, ln_new, 1)
+elif ln_new not in text:
+    raise SystemExit("SSR Plus ln_start_bin logging anchor not found")
+path.write_text(text)
+
+monitor = Path("feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor")
+mtext = monitor.read_text()
+
+monitor_vars = '''GLOBAL_SERVER=$(uci_get_by_type global global_server)
+server=$(uci_get_by_name $GLOBAL_SERVER server)'''
+monitor_vars_new = '''GLOBAL_SERVER=$(uci_get_by_type global global_server)
+TCP_REDIR_PORT=$(uci_get_by_name "$GLOBAL_SERVER" local_port 1234)
+
+tcp_port_listening() {
+	local port="$1"
+	local hex
+	case "$port" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	hex=$(printf '%04X' "$port" 2>/dev/null) || return 1
+	awk -v suffix=":$hex" '
+		$2 ~ (suffix "$") && $4 == "0A" { found=1 }
+		END { exit(found ? 0 : 1) }
+	' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+}
+
+dump_redir_runtime_log() {
+	local log
+	for log in "$TMP_PATH"/*.runtime.log; do
+		[ -s "$log" ] || continue
+		echolog "redir 核心日志：$(basename "$log")"
+		tail -n 8 "$log" 2>/dev/null | while IFS= read -r line; do
+			echolog "  $line"
+		done
+	done
+}
+
+server=$(uci_get_by_name $GLOBAL_SERVER server)'''
+if monitor_vars in mtext:
+    mtext = mtext.replace(monitor_vars, monitor_vars_new, 1)
+elif "tcp_port_listening()" not in mtext:
+    raise SystemExit("ssr-monitor variable anchor not found")
+
+redir_old = '''		icount=$(busybox ps -w | grep ssr-retcp | grep -v grep | wc -l)
+		if [ "$icount" == 0 ]; then
+			logger -t "$NAME" "ssrplus redir tcp error.restart!"
+			echolog "ssrplus redir tcp error.restart!"
+			/etc/init.d/shadowsocksr restart
+			exit 0
+		fi'''
+redir_new = '''		icount=$(busybox ps -w | grep ssr-retcp | grep -v grep | wc -l)
+		listen_count=0
+		tcp_port_listening "$TCP_REDIR_PORT" && listen_count=1
+
+		if [ "$icount" -eq 0 ] && [ "$listen_count" -eq 1 ]; then
+			echolog "redir tcp监控：ps未匹配，但端口$TCP_REDIR_PORT正常监听，保持运行。"
+		elif [ "$icount" -eq 0 ] && [ "$listen_count" -eq 0 ]; then
+			logger -t "$NAME" "ssrplus redir tcp error.restart!"
+			echolog "ssrplus redir tcp error.restart! (ps_count:$icount/listen:$listen_count/port:$TCP_REDIR_PORT)"
+			dump_redir_runtime_log
+			/etc/init.d/shadowsocksr restart
+			exit 0
+		fi'''
+if redir_old in mtext:
+    mtext = mtext.replace(redir_old, redir_new, 1)
+elif 'redir tcp监控：ps未匹配' not in mtext:
+    raise SystemExit("ssr-monitor redir tcp anchor not found")
+
+monitor.write_text(mtext)
+
+assert "runtime.log" in path.read_text()
+assert "tcp_port_listening()" in monitor.read_text()
+assert "ps_count:" in monitor.read_text()
+
 path.write_text(text)
 PY
 
@@ -434,6 +525,12 @@ grep -Fq "grep -q -- '--ipset'" feeds/helloworld/luci-app-ssr-plus/root/etc/init
   die "SSR Plus dnsmasq --help 能力探测未生效"
 grep -Fq '透明代理环境检测：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus 运行环境诊断日志未生效"
+grep -Fq 'runtime.log' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus 核心运行日志补丁未生效"
+grep -Fq 'tcp_port_listening()' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
+  die "SSR Plus monitor 端口存活检测未生效"
+grep -Fq 'ps_count:' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
+  die "SSR Plus monitor 失败诊断未生效"
 if grep -Eq 'iptables-(zz-legacy|mod-socket)' "$ssr_makefile"; then
   die "SSR Plus 仍残留现代 OpenWrt iptables 拆包依赖"
 fi
