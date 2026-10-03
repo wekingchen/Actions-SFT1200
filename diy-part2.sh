@@ -328,6 +328,117 @@ chmod +x feeds/PWpackages/shadowsocksr-libev/src/configure
 configure_naiveproxy
 
 
+section "SSR Plus iptables 透明代理兼容"
+
+# fw876/helloworld 当前按新版 OpenWrt 拆包方式要求 iptables-mod-socket /
+# iptables-zz-legacy；Siflower 18.06 使用旧版 legacy iptables，socket match
+# 应由 iptables-mod-tproxy / kmod-ipt-tproxy 一并提供。这里补回标准 18.06
+# 的 xt_socket 内核模块和 userspace extension，并修正 SSR Plus 的环境检测。
+python3 - <<'PY'
+from pathlib import Path
+import re
+
+# 1) 标准 OpenWrt 18.06 的 IPT_TPROXY 同时包含 xt_socket 与 xt_TPROXY。
+netfilter = Path("include/netfilter.mk")
+text = netfilter.read_text()
+socket_rule = "$(eval $(call nf_add,IPT_TPROXY,CONFIG_NETFILTER_XT_MATCH_SOCKET, $(P_XT)xt_socket))"
+target_marker = "$(eval $(call nf_add,IPT_TPROXY,CONFIG_NETFILTER_XT_TARGET_TPROXY,"
+if socket_rule not in text:
+    pos = text.find(target_marker)
+    if pos < 0:
+        raise SystemExit("include/netfilter.mk: IPT_TPROXY target anchor not found")
+    text = text[:pos] + socket_rule + "\n" + text[pos:]
+netfilter.write_text(text)
+
+# 2) 确保 kmod-ipt-tproxy 的 KCONFIG 会真正构建 xt_socket。
+modules = Path("package/kernel/linux/modules/netfilter.mk")
+text = modules.read_text()
+start = text.find("define KernelPackage/ipt-tproxy")
+end = text.find("$(eval $(call KernelPackage,ipt-tproxy))", start)
+if start < 0 or end < 0:
+    raise SystemExit("netfilter.mk: KernelPackage/ipt-tproxy block not found")
+block = text[start:end]
+needed = (
+    "CONFIG_NF_SOCKET_IPV4",
+    "CONFIG_NF_SOCKET_IPV6",
+    "CONFIG_NETFILTER_XT_MATCH_SOCKET",
+)
+missing = [symbol for symbol in needed if symbol not in block]
+if missing:
+    marker = "  KCONFIG:= \\\\\n"
+    rel = block.find(marker)
+    if rel < 0:
+        raise SystemExit("netfilter.mk: ipt-tproxy KCONFIG anchor not found")
+    insert = "".join(f"  \t{symbol} \\\\\n" for symbol in missing)
+    block = block[:rel + len(marker)] + insert + block[rel + len(marker):]
+    text = text[:start] + block + text[end:]
+modules.write_text(text)
+
+# 3) OpenWrt 18.06 没有新版拆分出来的 iptables-zz-legacy / iptables-mod-socket。
+#    legacy iptables 本身即为默认实现，socket userspace extension 归入 tproxy 包。
+makefile = Path("feeds/helloworld/luci-app-ssr-plus/Makefile")
+text = makefile.read_text()
+text = re.sub(r"^[ \t]*select PACKAGE_iptables-zz-legacy[ \t]*\n", "", text, flags=re.M)
+text = re.sub(r"^[ \t]*select PACKAGE_iptables-mod-socket[ \t]*\n", "", text, flags=re.M)
+makefile.write_text(text)
+
+# 4) 修正 SSR Plus 在旧系统上的运行环境检测：
+#    - dnsmasq -v 同时捕获 stdout/stderr；
+#    - ipset 特性匹配不依赖大小写/固定输出格式；
+#    - iptables/ipset 同时检查 PATH 与 18.06 的标准绝对路径；
+#    - 日志直接输出各检测位，真机排障不再靠猜。
+init = Path("feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr")
+text = init.read_text()
+
+replacements = {
+    'local dnsmasq_info=$(dnsmasq -v 2>/dev/null)':
+        'local dnsmasq_info="$(dnsmasq -v 2>&1)"',
+    'DNSMASQ_IPSET=0; [[ "$dnsmasq_info" == *" ipset"* ]] && DNSMASQ_IPSET=1':
+        'DNSMASQ_IPSET=0; echo "$dnsmasq_info" | grep -qiE \'(^|[[:space:]])ipset([[:space:]]|$)\' && DNSMASQ_IPSET=1',
+    'DNSMASQ_NFTSET=0; [[ "$dnsmasq_info" == *" nftset"* ]] && DNSMASQ_NFTSET=1':
+        'DNSMASQ_NFTSET=0; echo "$dnsmasq_info" | grep -qiE \'(^|[[:space:]])nftset([[:space:]]|$)\' && DNSMASQ_NFTSET=1',
+    'HAS_IPT=0; { command -v iptables-legacy || command -v iptables; } >/dev/null && HAS_IPT=1':
+        'HAS_IPT=0; { command -v iptables-legacy || command -v iptables || [ -x /usr/sbin/iptables ]; } >/dev/null 2>&1 && HAS_IPT=1',
+    'HAS_IPSET=$(command -v ipset >/dev/null && echo 1 || echo 0)':
+        'HAS_IPSET=$({ command -v ipset || [ -x /usr/sbin/ipset ]; } >/dev/null 2>&1 && echo 1 || echo 0)',
+    'dep_list="iptables-mod-tproxy iptables-mod-socket iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"':
+        'dep_list="iptables-mod-tproxy iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
+}
+for old, new in replacements.items():
+    if old in text:
+        text = text.replace(old, new, 1)
+    elif new not in text:
+        raise SystemExit(f"SSR Plus compatibility anchor not found: {old}")
+
+diag = '\techolog "透明代理环境检测：has_ipt:$HAS_IPT/has_ipset:$HAS_IPSET/dnsmasq_ipset:$DNSMASQ_IPSET/has_fw4:$HAS_FW4/has_nft:$HAS_NFT/dnsmasq_nftset:$DNSMASQ_NFTSET"\n'
+nft_line = '\tHAS_NFT=$(command -v nft >/dev/null && echo 1 || echo 0)\n'
+if diag not in text:
+    if nft_line not in text:
+        raise SystemExit("SSR Plus HAS_NFT anchor not found")
+    text = text.replace(nft_line, nft_line + diag, 1)
+
+init.write_text(text)
+
+# 最后做静态断言，避免上游变更后脚本静默失效。
+assert socket_rule in netfilter.read_text()
+assert "CONFIG_NETFILTER_XT_MATCH_SOCKET" in modules.read_text()[start:end + 200]
+assert "PACKAGE_iptables-mod-socket" not in makefile.read_text()
+assert "PACKAGE_iptables-zz-legacy" not in makefile.read_text()
+patched = init.read_text()
+assert 'dnsmasq -v 2>&1' in patched
+assert "透明代理环境检测：" in patched
+PY
+
+grep -Fq 'nf_add,IPT_TPROXY,CONFIG_NETFILTER_XT_MATCH_SOCKET' include/netfilter.mk ||
+  die "xt_socket 未加入 IPT_TPROXY 模块集合"
+grep -A20 '^define KernelPackage/ipt-tproxy' package/kernel/linux/modules/netfilter.mk |
+  grep -Fq 'CONFIG_NETFILTER_XT_MATCH_SOCKET' ||
+  die "kmod-ipt-tproxy 未启用 CONFIG_NETFILTER_XT_MATCH_SOCKET"
+grep -Fq '透明代理环境检测：' \
+  feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus 18.06 环境检测兼容补丁未生效"
+
+
 section "Passwall 与 LuCI 18.06 兼容"
 
 # Passwall UI 直接跟随 PWluci/main 当前版本。
@@ -660,7 +771,16 @@ for symbol in \
   PACKAGE_luci-i18n-adbyby-plus-zh-cn \
   PACKAGE_luci-app-autoreboot \
   PACKAGE_luci-i18n-autoreboot-zh-cn \
-  PACKAGE_luci-theme-argon-mod; do
+  PACKAGE_luci-theme-argon-mod \
+  PACKAGE_dnsmasq-full \
+  PACKAGE_dnsmasq_full_ipset \
+  PACKAGE_ipset \
+  PACKAGE_iptables \
+  PACKAGE_iptables-mod-tproxy \
+  PACKAGE_iptables-mod-iprange \
+  PACKAGE_iptables-mod-conntrack-extra \
+  PACKAGE_kmod-ipt-nat \
+  PACKAGE_kmod-ipt-tproxy; do
   config_enable "$symbol"
 done
 
@@ -691,6 +811,15 @@ required_symbols=(
   PACKAGE_luci-app-autoreboot
   PACKAGE_luci-i18n-autoreboot-zh-cn
   PACKAGE_luci-theme-argon-mod
+  PACKAGE_dnsmasq-full
+  PACKAGE_dnsmasq_full_ipset
+  PACKAGE_ipset
+  PACKAGE_iptables
+  PACKAGE_iptables-mod-tproxy
+  PACKAGE_iptables-mod-iprange
+  PACKAGE_iptables-mod-conntrack-extra
+  PACKAGE_kmod-ipt-nat
+  PACKAGE_kmod-ipt-tproxy
   CCACHE
 )
 
