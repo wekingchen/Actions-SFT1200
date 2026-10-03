@@ -365,11 +365,31 @@ new = '''check_run_environment() {
 	local prefer_nft="$(uci_get_by_type global prefer_nft 1)"
 	local dnsmasq_bin="/usr/sbin/dnsmasq"
 	[ -x "$dnsmasq_bin" ] || dnsmasq_bin="$(command -v dnsmasq 2>/dev/null)"
-	local dnsmasq_info="$("$dnsmasq_bin" -v 2>&1)"
-	local dnsmasq_ver=$(echo "$dnsmasq_info" | sed -n '1s/.*version \\([0-9.]*\\).*/\\1/p')
+	local dnsmasq_info=""
+	local dnsmasq_help=""
+	local dnsmasq_ver=""
+	local dnsmasq_features=""
 
-	DNSMASQ_IPSET=0; [[ "$dnsmasq_info" == *" ipset"* ]] && DNSMASQ_IPSET=1
-	DNSMASQ_NFTSET=0; [[ "$dnsmasq_info" == *" nftset"* ]] && DNSMASQ_NFTSET=1
+	if [ -n "$dnsmasq_bin" ] && [ -x "$dnsmasq_bin" ]; then
+		dnsmasq_info="$("$dnsmasq_bin" -v 2>&1)"
+		dnsmasq_help="$("$dnsmasq_bin" --help 2>&1)"
+		dnsmasq_ver=$(printf '%s\\n' "$dnsmasq_info" | sed -n '1s/.*version \\([0-9.]*\\).*/\\1/p')
+		dnsmasq_features=$(printf '%s\\n' "$dnsmasq_info" | sed -n 's/^Compile time options:[[:space:]]*//p' | head -n1)
+	fi
+
+	DNSMASQ_IPSET=0
+	if printf '%s\\n' "$dnsmasq_help" | grep -q -- '--ipset'; then
+		DNSMASQ_IPSET=1
+	elif printf '%s\\n' "$dnsmasq_info" | grep -Eq '(^|[[:space:]])ipset([[:space:]]|$)'; then
+		DNSMASQ_IPSET=1
+	fi
+
+	DNSMASQ_NFTSET=0
+	if printf '%s\\n' "$dnsmasq_help" | grep -q -- '--nftset'; then
+		DNSMASQ_NFTSET=1
+	elif printf '%s\\n' "$dnsmasq_info" | grep -Eq '(^|[[:space:]])nftset([[:space:]]|$)'; then
+		DNSMASQ_NFTSET=1
+	fi
 
 	HAS_IPT=0
 	if [ -x /usr/sbin/iptables-legacy ] || [ -x /usr/sbin/iptables ] || \
@@ -385,6 +405,9 @@ new = '''check_run_environment() {
 	HAS_FW4=$(command -v fw4 >/dev/null 2>&1 && echo 1 || echo 0)
 	HAS_NFT=$(command -v nft >/dev/null 2>&1 && echo 1 || echo 0)
 
+	[ -n "$dnsmasq_ver" ] || dnsmasq_ver="unknown"
+	[ -n "$dnsmasq_features" ] || dnsmasq_features="unknown"
+	echolog "dnsmasq能力：bin:${dnsmasq_bin:-missing}/version:$dnsmasq_ver/options:$dnsmasq_features"
 	echolog "透明代理环境检测：has_ipt:$HAS_IPT/has_ipset:$HAS_IPSET/dnsmasq_ipset:$DNSMASQ_IPSET/has_fw4:$HAS_FW4/has_nft:$HAS_NFT/dnsmasq_nftset:$DNSMASQ_NFTSET"
 '''
 
@@ -405,7 +428,11 @@ PY
 
 grep -Fq 'local dnsmasq_bin="/usr/sbin/dnsmasq"'   feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus dnsmasq 18.06 兼容检测未生效"
-grep -Fq '透明代理环境检测：'   feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+grep -Fq 'dnsmasq能力：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus dnsmasq 能力诊断日志未生效"
+grep -Fq "grep -q -- '--ipset'" feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus dnsmasq --help 能力探测未生效"
+grep -Fq '透明代理环境检测：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus 运行环境诊断日志未生效"
 if grep -Eq 'iptables-(zz-legacy|mod-socket)' "$ssr_makefile"; then
   die "SSR Plus 仍残留现代 OpenWrt iptables 拆包依赖"
