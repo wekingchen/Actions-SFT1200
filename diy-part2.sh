@@ -328,6 +328,286 @@ chmod +x feeds/PWpackages/shadowsocksr-libev/src/configure
 configure_naiveproxy
 
 
+section "SSR Plus iptables 透明代理兼容"
+
+# fw876/helloworld 当前版本同时兼容 fw4/nftables 与 fw3/iptables，但其新版
+# iptables 依赖按现代 OpenWrt 拆包：iptables-zz-legacy、iptables-mod-socket。
+# Siflower 18.06 使用 legacy iptables，socket match 已属于 iptables-mod-tproxy /
+# kmod-ipt-tproxy，不存在上述两个独立包，因此移除这两个无效 select。
+ssr_makefile="feeds/helloworld/luci-app-ssr-plus/Makefile"
+sed -i \
+  -e '/select PACKAGE_iptables-zz-legacy/d' \
+  -e '/select PACKAGE_iptables-mod-socket/d' \
+  "$ssr_makefile"
+
+# LuCI/procd 调用旧版 init 脚本时不要依赖外部 PATH；直接识别 18.06 固定位置。
+# dnsmasq -v 同时收集 stdout/stderr，避免 ipset 编译特性被误判为不存在。
+python3 - <<'PY'
+from pathlib import Path
+
+path = Path("feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr")
+text = path.read_text()
+
+old = '''check_run_environment() {
+	local prefer_nft="$(uci_get_by_type global prefer_nft 1)"
+	local dnsmasq_info=$(dnsmasq -v 2>/dev/null)
+	local dnsmasq_ver=$(echo "$dnsmasq_info" | sed -n '1s/.*version \\([0-9.]*\\).*/\\1/p')
+
+	DNSMASQ_IPSET=0; [[ "$dnsmasq_info" == *" ipset"* ]] && DNSMASQ_IPSET=1
+	DNSMASQ_NFTSET=0; [[ "$dnsmasq_info" == *" nftset"* ]] && DNSMASQ_NFTSET=1
+	HAS_IPT=0; { command -v iptables-legacy || command -v iptables; } >/dev/null && HAS_IPT=1
+	HAS_IPSET=$(command -v ipset >/dev/null && echo 1 || echo 0)
+	HAS_FW4=$(command -v fw4 >/dev/null && echo 1 || echo 0)
+	HAS_NFT=$(command -v nft >/dev/null && echo 1 || echo 0)
+'''
+
+new = '''check_run_environment() {
+	local prefer_nft="$(uci_get_by_type global prefer_nft 1)"
+	local dnsmasq_bin="/usr/sbin/dnsmasq"
+	[ -x "$dnsmasq_bin" ] || dnsmasq_bin="$(command -v dnsmasq 2>/dev/null)"
+	local dnsmasq_info=""
+	local dnsmasq_help=""
+	local dnsmasq_ver=""
+	local dnsmasq_features=""
+
+	if [ -n "$dnsmasq_bin" ] && [ -x "$dnsmasq_bin" ]; then
+		dnsmasq_info="$("$dnsmasq_bin" -v 2>&1)"
+		dnsmasq_help="$("$dnsmasq_bin" --help 2>&1)"
+		dnsmasq_ver=$(printf '%s\\n' "$dnsmasq_info" | sed -n '1s/.*version \\([0-9.]*\\).*/\\1/p')
+		dnsmasq_features=$(printf '%s\\n' "$dnsmasq_info" | sed -n 's/^Compile time options:[[:space:]]*//p' | head -n1)
+	fi
+
+	DNSMASQ_IPSET=0
+	if printf '%s\\n' "$dnsmasq_help" | grep -q -- '--ipset'; then
+		DNSMASQ_IPSET=1
+	elif printf '%s\\n' "$dnsmasq_info" | grep -Eq '(^|[[:space:]])ipset([[:space:]]|$)'; then
+		DNSMASQ_IPSET=1
+	fi
+
+	DNSMASQ_NFTSET=0
+	if printf '%s\\n' "$dnsmasq_help" | grep -q -- '--nftset'; then
+		DNSMASQ_NFTSET=1
+	elif printf '%s\\n' "$dnsmasq_info" | grep -Eq '(^|[[:space:]])nftset([[:space:]]|$)'; then
+		DNSMASQ_NFTSET=1
+	fi
+
+	HAS_IPT=0
+	if [ -x /usr/sbin/iptables-legacy ] || [ -x /usr/sbin/iptables ] || \
+	   command -v iptables-legacy >/dev/null 2>&1 || command -v iptables >/dev/null 2>&1; then
+		HAS_IPT=1
+	fi
+
+	HAS_IPSET=0
+	if [ -x /usr/sbin/ipset ] || command -v ipset >/dev/null 2>&1; then
+		HAS_IPSET=1
+	fi
+
+	HAS_FW4=$(command -v fw4 >/dev/null 2>&1 && echo 1 || echo 0)
+	HAS_NFT=$(command -v nft >/dev/null 2>&1 && echo 1 || echo 0)
+
+	[ -n "$dnsmasq_ver" ] || dnsmasq_ver="unknown"
+	[ -n "$dnsmasq_features" ] || dnsmasq_features="unknown"
+	echolog "dnsmasq能力：bin:${dnsmasq_bin:-missing}/version:$dnsmasq_ver/options:$dnsmasq_features"
+	echolog "透明代理环境检测：has_ipt:$HAS_IPT/has_ipset:$HAS_IPSET/dnsmasq_ipset:$DNSMASQ_IPSET/has_fw4:$HAS_FW4/has_nft:$HAS_NFT/dnsmasq_nftset:$DNSMASQ_NFTSET"
+'''
+
+if old not in text:
+    if new not in text:
+        raise SystemExit("SSR Plus check_run_environment anchor not found")
+else:
+    text = text.replace(old, new, 1)
+
+# 18.06 的 tproxy 包已包含 socket match，运行时依赖检查不要再要求现代独立包。
+text = text.replace(
+    'dep_list="iptables-mod-tproxy iptables-mod-socket iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
+    'dep_list="iptables-mod-tproxy iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
+)
+
+# 5) 18.06 上的 BusyBox ps 即使开启 -w，按配置文件名匹配 redir 进程仍可能不稳定。
+#    同时保留关键核心 stderr，并让 monitor 以 TCP 监听端口作为第二重存活依据。
+ln_old = '''	ulimit -n 1000000
+	${file_func:-echolog "  - ${ln_name}"} "$@" >/dev/null 2>&1 &
+}'''
+ln_new = '''	ulimit -n 1000000
+	case "$ln_name" in
+		v2ray|naive|ss-redir|ssr-redir|trojan|hysteria|tuic-client|shadow-tls)
+			local runtime_log="$TMP_PATH/${ln_name}.runtime.log"
+			: >"$runtime_log"
+			${file_func:-echolog "  - ${ln_name}"} "$@" >>"$runtime_log" 2>&1 &
+			;;
+		*)
+			${file_func:-echolog "  - ${ln_name}"} "$@" >/dev/null 2>&1 &
+			;;
+	esac
+}'''
+if ln_old in text:
+    text = text.replace(ln_old, ln_new, 1)
+elif ln_new not in text:
+    raise SystemExit("SSR Plus ln_start_bin logging anchor not found")
+path.write_text(text)
+
+monitor = Path("feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor")
+mtext = monitor.read_text()
+
+monitor_vars = '''GLOBAL_SERVER=$(uci_get_by_type global global_server)
+server=$(uci_get_by_name $GLOBAL_SERVER server)'''
+monitor_vars_new = '''GLOBAL_SERVER=$(uci_get_by_type global global_server)
+TCP_REDIR_PORT=$(uci_get_by_name "$GLOBAL_SERVER" local_port 1234)
+
+tcp_port_listening() {
+	local port="$1"
+	local hex
+	case "$port" in
+		''|*[!0-9]*) return 1 ;;
+	esac
+	hex=$(printf '%04X' "$port" 2>/dev/null) || return 1
+	awk -v suffix=":$hex" '
+		$2 ~ (suffix "$") && $4 == "0A" { found=1 }
+		END { exit(found ? 0 : 1) }
+	' /proc/net/tcp /proc/net/tcp6 2>/dev/null
+}
+
+dump_redir_runtime_log() {
+	local log
+	for log in "$TMP_PATH"/*.runtime.log; do
+		[ -s "$log" ] || continue
+		echolog "redir 核心日志：$(basename "$log")"
+		tail -n 8 "$log" 2>/dev/null | while IFS= read -r line; do
+			echolog "  $line"
+		done
+	done
+}
+
+server=$(uci_get_by_name $GLOBAL_SERVER server)'''
+if monitor_vars in mtext:
+    mtext = mtext.replace(monitor_vars, monitor_vars_new, 1)
+elif "tcp_port_listening()" not in mtext:
+    raise SystemExit("ssr-monitor variable anchor not found")
+
+redir_old = '''		icount=$(busybox ps -w | grep ssr-retcp | grep -v grep | wc -l)
+		if [ "$icount" == 0 ]; then
+			logger -t "$NAME" "ssrplus redir tcp error.restart!"
+			echolog "ssrplus redir tcp error.restart!"
+			/etc/init.d/shadowsocksr restart
+			exit 0
+		fi'''
+redir_new = '''		icount=$(busybox ps -w | grep ssr-retcp | grep -v grep | wc -l)
+		listen_count=0
+		tcp_port_listening "$TCP_REDIR_PORT" && listen_count=1
+
+		if [ "$icount" -eq 0 ] && [ "$listen_count" -eq 1 ]; then
+			echolog "redir tcp监控：ps未匹配，但端口$TCP_REDIR_PORT正常监听，保持运行。"
+		elif [ "$icount" -eq 0 ] && [ "$listen_count" -eq 0 ]; then
+			logger -t "$NAME" "ssrplus redir tcp error.restart!"
+			echolog "ssrplus redir tcp error.restart! (ps_count:$icount/listen:$listen_count/port:$TCP_REDIR_PORT)"
+			dump_redir_runtime_log
+			/etc/init.d/shadowsocksr restart
+			exit 0
+		fi'''
+if redir_old in mtext:
+    mtext = mtext.replace(redir_old, redir_new, 1)
+elif 'redir tcp监控：ps未匹配' not in mtext:
+    raise SystemExit("ssr-monitor redir tcp anchor not found")
+
+monitor.write_text(mtext)
+
+# 6) SFT1200 / OpenWrt 18.06 是 fw3/iptables 平台。
+#    上游默认 prefer_nft=1 会造成每次启动先报 nftables 不完整再回退。
+client_lua = Path("feeds/helloworld/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua")
+ctext = client_lua.read_text()
+needle = '''o = s:option(ListValue, "prefer_nft", translate("Prefer firewall tools"))
+o.default = "1"
+o:value("0", "Iptables")
+o:value("1", "Nftables")'''
+replacement = '''o = s:option(ListValue, "prefer_nft", translate("Prefer firewall tools"))
+o.default = "0"
+o:value("0", "Iptables")
+o:value("1", "Nftables")'''
+if needle in ctext:
+    ctext = ctext.replace(needle, replacement, 1)
+elif replacement not in ctext:
+    raise SystemExit("SSR Plus prefer_nft UI anchor not found")
+client_lua.write_text(ctext)
+
+default_cfg = Path("feeds/helloworld/luci-app-ssr-plus/root/usr/share/shadowsocksr/shadowsocksr.config")
+cfgtext = default_cfg.read_text()
+cfgtext = cfgtext.replace("option prefer_nft '1'", "option prefer_nft '0'")
+default_cfg.write_text(cfgtext)
+
+# 当 UCI 项不存在时也默认 iptables；已有用户明确选择仍然尊重。
+text = text.replace(
+    'local prefer_nft="$(uci_get_by_type global prefer_nft 1)"',
+    'local prefer_nft="$(uci_get_by_type global prefer_nft 0)"',
+)
+
+# 7) Xray 在真正启动前先使用官方 -test 校验配置。
+#    新版核心若拒绝旧式公网 VLESS 明文节点，直接打印原因并停止，
+#    不再先显示 Started 再由 monitor 每 30 秒循环重启。
+v2ray_old = '''	v2ray)
+		gen_config_file $GLOBAL_SERVER $type 1 $tcp_port $socks_port
+		ln_start_bin $(first_type xray v2ray) v2ray run -c $tcp_config_file
+		echolog "Main node:$($(first_type xray v2ray) version | head -1) Started!"
+		;;'''
+v2ray_new = '''	v2ray)
+		gen_config_file $GLOBAL_SERVER $type 1 $tcp_port $socks_port
+		local core_bin="$(first_type xray v2ray)"
+		if [ "$(basename "$core_bin")" = "xray" ]; then
+			local xray_check
+			xray_check="$("$core_bin" run -test -c "$tcp_config_file" 2>&1)"
+			local xray_rc=$?
+			if [ "$xray_rc" -ne 0 ]; then
+				echolog "Xray 配置校验失败，主节点未启动："
+				printf '%s\n' "$xray_check" | tail -n 10 | while IFS= read -r line; do
+					echolog "  $line"
+				done
+				echolog "-----------end------------"
+				_exit 2
+			fi
+		fi
+		ln_start_bin "$core_bin" v2ray run -c "$tcp_config_file"
+		echolog "Main node:$("$core_bin" version | head -1) Started!"
+		;;'''
+if v2ray_old in text:
+    text = text.replace(v2ray_old, v2ray_new, 1)
+elif 'Xray 配置校验失败，主节点未启动' not in text:
+    raise SystemExit("SSR Plus v2ray start anchor not found")
+
+assert 'prefer_nft 0' in text
+assert 'Xray 配置校验失败，主节点未启动' in text
+assert 'o.default = "0"' in client_lua.read_text()
+assert "option prefer_nft '0'" in default_cfg.read_text()
+assert "runtime.log" in text
+assert "tcp_port_listening()" in monitor.read_text()
+assert "ps_count:" in monitor.read_text()
+
+path.write_text(text)
+PY
+
+grep -Fq 'local dnsmasq_bin="/usr/sbin/dnsmasq"'   feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus dnsmasq 18.06 兼容检测未生效"
+grep -Fq 'dnsmasq能力：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus dnsmasq 能力诊断日志未生效"
+grep -Fq "grep -q -- '--ipset'" feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus dnsmasq --help 能力探测未生效"
+grep -Fq '透明代理环境检测：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus 运行环境诊断日志未生效"
+grep -Fq 'runtime.log' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus 核心运行日志补丁未生效"
+grep -Fq 'tcp_port_listening()' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
+  die "SSR Plus monitor 端口存活检测未生效"
+grep -Fq 'ps_count:' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
+  die "SSR Plus monitor 失败诊断未生效"
+grep -Fq 'uci_get_by_type global prefer_nft 0' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus SFT1200 默认 iptables 未生效"
+grep -Fq 'Xray 配置校验失败，主节点未启动' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus Xray 启动前配置校验未生效"
+grep -Fq 'o.default = "0"' feeds/helloworld/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua ||
+  die "SSR Plus LuCI 默认 firewall 未切换为 iptables"
+if grep -Eq 'iptables-(zz-legacy|mod-socket)' "$ssr_makefile"; then
+  die "SSR Plus 仍残留现代 OpenWrt iptables 拆包依赖"
+fi
+
+
 section "Passwall 与 LuCI 18.06 兼容"
 
 # Passwall UI 直接跟随 PWluci/main 当前版本。
@@ -660,7 +940,16 @@ for symbol in \
   PACKAGE_luci-i18n-adbyby-plus-zh-cn \
   PACKAGE_luci-app-autoreboot \
   PACKAGE_luci-i18n-autoreboot-zh-cn \
-  PACKAGE_luci-theme-argon-mod; do
+  PACKAGE_luci-theme-argon-mod \
+  PACKAGE_dnsmasq-full \
+  PACKAGE_dnsmasq_full_ipset \
+  PACKAGE_ipset \
+  PACKAGE_iptables \
+  PACKAGE_iptables-mod-tproxy \
+  PACKAGE_iptables-mod-iprange \
+  PACKAGE_iptables-mod-conntrack-extra \
+  PACKAGE_kmod-ipt-nat \
+  PACKAGE_kmod-ipt-tproxy; do
   config_enable "$symbol"
 done
 
@@ -691,6 +980,15 @@ required_symbols=(
   PACKAGE_luci-app-autoreboot
   PACKAGE_luci-i18n-autoreboot-zh-cn
   PACKAGE_luci-theme-argon-mod
+  PACKAGE_dnsmasq-full
+  PACKAGE_dnsmasq_full_ipset
+  PACKAGE_ipset
+  PACKAGE_iptables
+  PACKAGE_iptables-mod-tproxy
+  PACKAGE_iptables-mod-iprange
+  PACKAGE_iptables-mod-conntrack-extra
+  PACKAGE_kmod-ipt-nat
+  PACKAGE_kmod-ipt-tproxy
   CCACHE
 )
 
