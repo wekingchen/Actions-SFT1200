@@ -30,6 +30,10 @@ grep -Fq '[ -x /usr/sbin/iptables ]' "$src" ||
   die "SSR Plus iptables 绝对路径检测未生效"
 grep -Fq '[ -x /usr/sbin/ipset ]' "$src" ||
   die "SSR Plus ipset 绝对路径检测未生效"
+grep -Fq "grep -q -- '--ipset'" "$src" ||
+  die "SSR Plus dnsmasq --help 能力探测未生效"
+grep -Fq 'dnsmasq能力：' "$src" ||
+  die "SSR Plus dnsmasq 能力诊断日志未生效"
 grep -Fq '透明代理环境检测：' "$src" ||
   die "SSR Plus 环境诊断日志未生效"
 
@@ -48,7 +52,25 @@ final_init="$tmp/etc/init.d/shadowsocksr"
 [ -f "$final_init" ] || die "最终 SSR Plus ipk 缺少 init 脚本"
 grep -Fq 'local dnsmasq_bin="/usr/sbin/dnsmasq"' "$final_init" ||
   die "最终 SSR Plus ipk 未包含 dnsmasq 兼容修复"
+grep -Fq "grep -q -- '--ipset'" "$final_init" ||
+  die "最终 SSR Plus ipk 未包含 dnsmasq --help 能力探测"
+grep -Fq 'dnsmasq能力：' "$final_init" ||
+  die "最终 SSR Plus ipk 未包含 dnsmasq 能力诊断日志"
 grep -Fq '透明代理环境检测：' "$final_init" ||
   die "最终 SSR Plus ipk 未包含环境诊断日志"
 
+mapfile -t dnsmasq_ipks < <(find bin -type f -name 'dnsmasq-full_*.ipk' -print | sort)
+[ "${#dnsmasq_ipks[@]}" -eq 1 ] || die "dnsmasq-full ipk 数量异常：${#dnsmasq_ipks[@]}"
+
+dns_tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$dns_tmp"' EXIT
+tar -xzf "${dnsmasq_ipks[0]}" -C "$dns_tmp" ./data.tar.gz
+tar -xzf "$dns_tmp/data.tar.gz" -C "$dns_tmp"
+dns_bin="$dns_tmp/usr/sbin/dnsmasq"
+[ -f "$dns_bin" ] || die "dnsmasq-full ipk 缺少 /usr/sbin/dnsmasq"
+
+strings "$dns_bin" | grep -Eq '^(IPv6|no-IPv6).*[[:space:]]ipset([[:space:]]|$)' ||
+  die "最终 dnsmasq-full 二进制未编入 ipset 能力"
+
+echo "dnsmasq-full 二进制 ipset 能力检查通过"
 echo "SSR Plus iptables 透明代理兼容校验通过"
