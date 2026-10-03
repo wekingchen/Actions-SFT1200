@@ -510,7 +510,72 @@ elif 'redir tcp监控：ps未匹配' not in mtext:
 
 monitor.write_text(mtext)
 
-assert "runtime.log" in path.read_text()
+# 6) SFT1200 / OpenWrt 18.06 是 fw3/iptables 平台。
+#    上游默认 prefer_nft=1 会造成每次启动先报 nftables 不完整再回退。
+client_lua = Path("feeds/helloworld/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua")
+ctext = client_lua.read_text()
+needle = '''o = s:option(ListValue, "prefer_nft", translate("Prefer firewall tools"))
+o.default = "1"
+o:value("0", "Iptables")
+o:value("1", "Nftables")'''
+replacement = '''o = s:option(ListValue, "prefer_nft", translate("Prefer firewall tools"))
+o.default = "0"
+o:value("0", "Iptables")
+o:value("1", "Nftables")'''
+if needle in ctext:
+    ctext = ctext.replace(needle, replacement, 1)
+elif replacement not in ctext:
+    raise SystemExit("SSR Plus prefer_nft UI anchor not found")
+client_lua.write_text(ctext)
+
+default_cfg = Path("feeds/helloworld/luci-app-ssr-plus/root/usr/share/shadowsocksr/shadowsocksr.config")
+cfgtext = default_cfg.read_text()
+cfgtext = cfgtext.replace("option prefer_nft '1'", "option prefer_nft '0'")
+default_cfg.write_text(cfgtext)
+
+# 当 UCI 项不存在时也默认 iptables；已有用户明确选择仍然尊重。
+text = text.replace(
+    'local prefer_nft="$(uci_get_by_type global prefer_nft 1)"',
+    'local prefer_nft="$(uci_get_by_type global prefer_nft 0)"',
+)
+
+# 7) Xray 在真正启动前先使用官方 -test 校验配置。
+#    新版核心若拒绝旧式公网 VLESS 明文节点，直接打印原因并停止，
+#    不再先显示 Started 再由 monitor 每 30 秒循环重启。
+v2ray_old = '''	v2ray)
+		gen_config_file $GLOBAL_SERVER $type 1 $tcp_port $socks_port
+		ln_start_bin $(first_type xray v2ray) v2ray run -c $tcp_config_file
+		echolog "Main node:$($(first_type xray v2ray) version | head -1) Started!"
+		;;'''
+v2ray_new = '''	v2ray)
+		gen_config_file $GLOBAL_SERVER $type 1 $tcp_port $socks_port
+		local core_bin="$(first_type xray v2ray)"
+		if [ "$(basename "$core_bin")" = "xray" ]; then
+			local xray_check
+			xray_check="$("$core_bin" run -test -c "$tcp_config_file" 2>&1)"
+			local xray_rc=$?
+			if [ "$xray_rc" -ne 0 ]; then
+				echolog "Xray 配置校验失败，主节点未启动："
+				printf '%s\n' "$xray_check" | tail -n 10 | while IFS= read -r line; do
+					echolog "  $line"
+				done
+				echolog "-----------end------------"
+				_exit 2
+			fi
+		fi
+		ln_start_bin "$core_bin" v2ray run -c "$tcp_config_file"
+		echolog "Main node:$("$core_bin" version | head -1) Started!"
+		;;'''
+if v2ray_old in text:
+    text = text.replace(v2ray_old, v2ray_new, 1)
+elif 'Xray 配置校验失败，主节点未启动' not in text:
+    raise SystemExit("SSR Plus v2ray start anchor not found")
+
+assert 'prefer_nft 0' in text
+assert 'Xray 配置校验失败，主节点未启动' in text
+assert 'o.default = "0"' in client_lua.read_text()
+assert "option prefer_nft '0'" in default_cfg.read_text()
+assert "runtime.log" in text
 assert "tcp_port_listening()" in monitor.read_text()
 assert "ps_count:" in monitor.read_text()
 
@@ -531,6 +596,12 @@ grep -Fq 'tcp_port_listening()' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/
   die "SSR Plus monitor 端口存活检测未生效"
 grep -Fq 'ps_count:' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
   die "SSR Plus monitor 失败诊断未生效"
+grep -Fq 'uci_get_by_type global prefer_nft 0' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus SFT1200 默认 iptables 未生效"
+grep -Fq 'Xray 配置校验失败，主节点未启动' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus Xray 启动前配置校验未生效"
+grep -Fq 'o.default = "0"' feeds/helloworld/luci-app-ssr-plus/luasrc/model/cbi/shadowsocksr/client.lua ||
+  die "SSR Plus LuCI 默认 firewall 未切换为 iptables"
 if grep -Eq 'iptables-(zz-legacy|mod-socket)' "$ssr_makefile"; then
   die "SSR Plus 仍残留现代 OpenWrt iptables 拆包依赖"
 fi
