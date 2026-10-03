@@ -407,8 +407,6 @@ new = '''check_run_environment() {
 
 	[ -n "$dnsmasq_ver" ] || dnsmasq_ver="unknown"
 	[ -n "$dnsmasq_features" ] || dnsmasq_features="unknown"
-	echolog "dnsmasq能力：bin:${dnsmasq_bin:-missing}/version:$dnsmasq_ver/options:$dnsmasq_features"
-	echolog "透明代理环境检测：has_ipt:$HAS_IPT/has_ipset:$HAS_IPSET/dnsmasq_ipset:$DNSMASQ_IPSET/has_fw4:$HAS_FW4/has_nft:$HAS_NFT/dnsmasq_nftset:$DNSMASQ_NFTSET"
 '''
 
 if old not in text:
@@ -422,6 +420,22 @@ text = text.replace(
     'dep_list="iptables-mod-tproxy iptables-mod-socket iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
     'dep_list="iptables-mod-tproxy iptables-mod-iprange iptables-mod-conntrack-extra kmod-ipt-nat"',
 )
+
+# 正常启动不再重复打印能力探测；仅在没有可用 firewall backend 时输出完整诊断。
+failure_old = '''	else
+		echolog "警告：不满足任何透明代理系统环境。"
+	fi
+}'''
+failure_new = '''	else
+		echolog "警告：不满足任何透明代理系统环境。"
+		echolog "dnsmasq能力：bin:${dnsmasq_bin:-missing}/version:$dnsmasq_ver/options:$dnsmasq_features"
+		echolog "透明代理环境异常：has_ipt:$HAS_IPT/has_ipset:$HAS_IPSET/dnsmasq_ipset:$DNSMASQ_IPSET/has_fw4:$HAS_FW4/has_nft:$HAS_NFT/dnsmasq_nftset:$DNSMASQ_NFTSET"
+	fi
+}'''
+if failure_old in text:
+    text = text.replace(failure_old, failure_new, 1)
+elif failure_new not in text:
+    raise SystemExit("SSR Plus firewall failure diagnostics anchor not found")
 
 # 5) 18.06 上的 BusyBox ps 即使开启 -w，按配置文件名匹配 redir 进程仍可能不稳定。
 #    同时保留关键核心 stderr，并让 monitor 以 TCP 监听端口作为第二重存活依据。
@@ -586,11 +600,14 @@ PY
 grep -Fq 'local dnsmasq_bin="/usr/sbin/dnsmasq"'   feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus dnsmasq 18.06 兼容检测未生效"
 grep -Fq 'dnsmasq能力：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
-  die "SSR Plus dnsmasq 能力诊断日志未生效"
+  die "SSR Plus 异常 dnsmasq 能力诊断未保留"
 grep -Fq "grep -q -- '--ipset'" feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus dnsmasq --help 能力探测未生效"
-grep -Fq '透明代理环境检测：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
-  die "SSR Plus 运行环境诊断日志未生效"
+grep -Fq '透明代理环境异常：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
+  die "SSR Plus 异常环境诊断未保留"
+if grep -Fq '透明代理环境检测：' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr; then
+  die "SSR Plus 仍残留正常启动环境检测日志"
+fi
 grep -Fq 'runtime.log' feeds/helloworld/luci-app-ssr-plus/root/etc/init.d/shadowsocksr ||
   die "SSR Plus 核心运行日志补丁未生效"
 grep -Fq 'tcp_port_listening()' feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor ||
