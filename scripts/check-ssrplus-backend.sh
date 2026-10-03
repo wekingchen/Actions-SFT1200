@@ -36,6 +36,13 @@ grep -Fq 'dnsmasq能力：' "$src" ||
   die "SSR Plus dnsmasq 能力诊断日志未生效"
 grep -Fq '透明代理环境检测：' "$src" ||
   die "SSR Plus 环境诊断日志未生效"
+grep -Fq 'runtime.log' "$src" ||
+  die "SSR Plus 核心运行日志补丁未生效"
+monitor_src="feeds/helloworld/luci-app-ssr-plus/root/usr/bin/ssr-monitor"
+grep -Fq 'tcp_port_listening()' "$monitor_src" ||
+  die "SSR Plus monitor 端口存活检测未生效"
+grep -Fq 'ps_count:' "$monitor_src" ||
+  die "SSR Plus monitor 失败诊断未生效"
 
 makefile="feeds/helloworld/luci-app-ssr-plus/Makefile"
 ! grep -Eq 'iptables-(zz-legacy|mod-socket)' "$makefile" ||
@@ -58,6 +65,15 @@ grep -Fq 'dnsmasq能力：' "$final_init" ||
   die "最终 SSR Plus ipk 未包含 dnsmasq 能力诊断日志"
 grep -Fq '透明代理环境检测：' "$final_init" ||
   die "最终 SSR Plus ipk 未包含环境诊断日志"
+grep -Fq 'runtime.log' "$final_init" ||
+  die "最终 SSR Plus ipk 未包含核心运行日志补丁"
+
+final_monitor="$tmp/usr/bin/ssr-monitor"
+[ -f "$final_monitor" ] || die "最终 SSR Plus ipk 缺少 ssr-monitor"
+grep -Fq 'tcp_port_listening()' "$final_monitor" ||
+  die "最终 SSR Plus ipk 未包含 monitor 端口存活检测"
+grep -Fq 'ps_count:' "$final_monitor" ||
+  die "最终 SSR Plus ipk 未包含 monitor 失败诊断"
 
 mapfile -t dnsmasq_ipks < <(find bin -type f -name 'dnsmasq-full_*.ipk' -print | sort)
 [ "${#dnsmasq_ipks[@]}" -eq 1 ] || die "dnsmasq-full ipk 数量异常：${#dnsmasq_ipks[@]}"
