@@ -432,6 +432,7 @@ ln_new = '''	ulimit -n 1000000
 	case "$ln_name" in
 		v2ray|naive|ss-redir|ssr-redir|trojan|hysteria|tuic-client|shadow-tls)
 			local runtime_log="$TMP_PATH/${ln_name}.runtime.log"
+			: >"$runtime_log"
 			${file_func:-echolog "  - ${ln_name}"} "$@" >>"$runtime_log" 2>&1 &
 			;;
 		*)
